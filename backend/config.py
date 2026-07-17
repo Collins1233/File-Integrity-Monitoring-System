@@ -14,6 +14,12 @@ from config import BASELINE_FILE
 from config import SUPPORTED_FILE_TYPES
 """
 
+import os
+
+# Repository root (parent of backend/). Runtime data lives here.
+BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
+
 # =========================================================
 # APPLICATION INFORMATION
 # =========================================================
@@ -27,15 +33,15 @@ WINDOW_TITLE = "File Integrity Monitoring System"
 # BASELINE SETTINGS
 # =========================================================
 
-BASELINE_FILE = "baseline.json"
-BASELINE_FOLDER = "baseline_files"
-SETTINGS_FILE = "settings.json"
+BASELINE_FILE = os.path.join(PROJECT_ROOT, "baseline.json")
+BASELINE_FOLDER = os.path.join(PROJECT_ROOT, "baseline_files")
+SETTINGS_FILE = os.path.join(PROJECT_ROOT, "settings.json")
 
 # =========================================================
 # REPORT SETTINGS
 # =========================================================
 
-REPORT_FOLDER = "reports"
+REPORT_FOLDER = os.path.join(PROJECT_ROOT, "reports")
 MAX_REPORTS_RETAINED = 5
 REPORT_TITLE = "FILE INTEGRITY MONITOR REPORT"
 
@@ -43,7 +49,7 @@ REPORT_TITLE = "FILE INTEGRITY MONITOR REPORT"
 # LOG SETTINGS
 # =========================================================
 
-LOG_FILE = "fim_log.txt"
+LOG_FILE = os.path.join(PROJECT_ROOT, "fim_log.txt")
 
 # =========================================================
 # HASH SETTINGS

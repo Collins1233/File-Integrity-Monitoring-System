@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Settings, Moon, Sun, CheckCircle, AlertCircle } from 'lucide-react';
 
-const API_BASE = window.location.origin.includes(':517') ? 'http://127.0.0.1:8000' : '';
+import { API_BASE } from './api';
 
 export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
   const [settings, setSettings] = useState({

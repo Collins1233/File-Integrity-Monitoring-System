@@ -32,7 +32,7 @@ from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
-from config import APP_VERSION, MAX_REPORTS_RETAINED
+from config import APP_VERSION, MAX_REPORTS_RETAINED, PROJECT_ROOT
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FIM_Server")
@@ -536,7 +536,7 @@ def api_export_logs(format: str = Query("json", pattern="^(json|csv)$")):
     )
 
 
-frontend_dist = os.path.abspath("frontend/dist")
+frontend_dist = os.path.join(PROJECT_ROOT, "frontend", "dist")
 if os.path.exists(frontend_dist):
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
 else:

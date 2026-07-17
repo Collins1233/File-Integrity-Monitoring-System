@@ -1,0 +1,23 @@
+{
+  "name": "file-integrity-monitoring-system",
+  "private": true,
+  "version": "2.0.0",
+  "description": "File Integrity Monitoring System — React frontend + Python API",
+  "scripts": {
+    "predev": "sh scripts/free-dev-ports.sh",
+    "dev": "concurrently -k -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:clean": "sh scripts/free-dev-ports.sh",
+    "dev:web": "wait-on -t 60000 http-get://127.0.0.1:8000/api/status && npm run dev --prefix frontend",
+    "dev:api": "python3 backend/server.py",
+    "build": "npm run build --prefix frontend",
+    "prestart": "sh scripts/free-dev-ports.sh",
+    "start": "npm run build && npm run start:api",
+    "start:api": "python3 backend/server.py",
+    "lint": "npm run lint --prefix frontend",
+    "install:all": "npm install && npm install --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "wait-on": "^8.0.5"
+  }
+}

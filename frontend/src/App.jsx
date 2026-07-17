@@ -41,8 +41,9 @@ import {
   getAffectedFiles,
 } from './alertUtils';
 
-const API_BASE = window.location.origin.includes(':517') ? 'http://127.0.0.1:8000' : '';
-const APP_ICON = `${API_BASE || window.location.origin}/favicon.svg`;
+import { API_BASE } from './api';
+
+const APP_ICON = `${window.location.origin}/favicon.svg`;
 
 function sanitizeFolderPath(rawPath) {
   return rawPath.trim().replace(/^["']|["']$/g, '');
@@ -931,9 +932,9 @@ function App() {
                 )}
               </div>
 
-              <div className="glass-panel action-card">
+              <div className="glass-panel action-card action-card-compact">
                 <h3 className="card-title"><Clock size={18} className="text-warning" /> Baseline Info</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem' }}>
+                <div className="baseline-info-body">
                   <div>
                     <span className="text-muted">Status: </span>
                     <span className={status.has_baseline ? "text-success" : "text-danger"}>
@@ -950,7 +951,9 @@ function App() {
                   </div>
                   <div>
                     <span className="text-muted">Active target: </span>
-                    <span className="text-primary" style={{ wordBreak: 'break-all' }}>{status.folder_path || 'None'}</span>
+                    <span className="baseline-info-path" title={status.folder_path || 'None'}>
+                      {status.folder_path || 'None'}
+                    </span>
                   </div>
                 </div>
               </div>

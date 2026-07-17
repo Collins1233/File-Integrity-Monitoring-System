@@ -12,6 +12,7 @@ venv/
 # Build folders
 build/
 dist/
+node_modules/
 
 # Generated files
 baseline.json

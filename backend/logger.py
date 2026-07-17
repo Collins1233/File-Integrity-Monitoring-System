@@ -1,6 +1,6 @@
 from datetime import datetime
 
-LOG_FILE = "fim_log.txt"
+from config import LOG_FILE
 
 
 def save_log(message):

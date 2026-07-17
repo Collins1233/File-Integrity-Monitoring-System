@@ -5,10 +5,7 @@ import uuid
 from datetime import datetime
 
 from scanner import scan_folder_with_options, scan_files_with_options
-from config import BASELINE_FILE, BASELINE_FOLDER, BACKUP_FILE_TYPES
-
-
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+from config import BASELINE_FILE, BASELINE_FOLDER, BACKUP_FILE_TYPES, PROJECT_ROOT
 
 
 def normalize_folder_path(folder_path: str) -> str:
