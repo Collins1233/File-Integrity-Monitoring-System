@@ -652,7 +652,8 @@ function App() {
 
       {!serverOnline && (
         <div className="server-offline-banner">
-          Cannot reach the monitoring server. From the project root run <code>npm run dev</code> (starts API + UI). Reconnecting…
+          Cannot reach the monitoring server. From the project root run{' '}
+          <code>npm run install:all</code> once, then <code>npm run dev</code>. Reconnecting…
         </div>
       )}
 

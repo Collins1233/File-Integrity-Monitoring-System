@@ -1,33 +1,23 @@
-const { spawn } = require('child_process');
 const path = require('path');
+const spawn = require('cross-spawn');
+const { PYTHON_CANDIDATES } = require('./python');
 
 const projectRoot = path.join(__dirname, '..');
 const serverPath = path.join(projectRoot, 'backend', 'server.py');
 
-const pythonCommands = process.platform === 'win32'
-  ? [
-      { command: 'py', args: ['-3', serverPath] },
-      { command: 'python', args: [serverPath] },
-      { command: 'python3', args: [serverPath] },
-    ]
-  : [
-      { command: 'python3', args: [serverPath] },
-      { command: 'python', args: [serverPath] },
-    ];
-
 function startApi(index = 0) {
-  if (index >= pythonCommands.length) {
+  if (index >= PYTHON_CANDIDATES.length) {
     console.error('\nCould not start the API server: Python 3 was not found.');
     console.error('Install Python 3.10+ from https://www.python.org/downloads/');
-    console.error('Then run: pip install -r backend/requirements.txt\n');
+    console.error('Then run: npm run setup:python\n');
     process.exit(1);
   }
 
-  const { command, args } = pythonCommands[index];
-  const child = spawn(command, args, {
+  const { command, args } = PYTHON_CANDIDATES[index];
+  const child = spawn(command, [...args, serverPath], {
     cwd: projectRoot,
     stdio: 'inherit',
-    shell: false,
+    shell: process.platform === 'win32',
   });
 
   child.on('error', () => startApi(index + 1));
@@ -37,6 +27,12 @@ function startApi(index = 0) {
       process.exit(1);
       return;
     }
+
+    if (code && code !== 0) {
+      console.error('\nAPI server stopped unexpectedly.');
+      console.error('If dependencies are missing, run: npm run setup:python\n');
+    }
+
     process.exit(code ?? 0);
   });
 }

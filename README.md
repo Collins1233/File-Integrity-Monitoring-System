@@ -17,19 +17,20 @@ Runtime data (baseline, logs, reports) is stored at the repository root.
 
 ## Quick start
 
-### 1. Install dependencies
+### 1. Install dependencies (one time)
 
 ```bash
-# From the project root
-pip install -r backend/requirements.txt
+# From the project root — installs Node + Python dependencies
 npm run install:all
 ```
 
-On **Windows**, use `pip` or `py -3 -m pip install -r backend/requirements.txt` if `python` is not on PATH.
+On **Windows**, install [Python 3.10+](https://www.python.org/downloads/) and check **“Add Python to PATH”** during setup. If `install:all` fails, run:
 
-### 2. Development (recommended)
+```bash
+py -3 -m pip install -r backend/requirements.txt
+```
 
-Starts the API on port **8000** and the UI on port **5173** with hot reload:
+### 2. Development
 
 ```bash
 npm run dev
@@ -37,7 +38,7 @@ npm run dev
 
 Open **http://localhost:5173**
 
-Works on **macOS, Linux, and Windows** — no need to run Python manually.
+This starts **both** the Python API (port 8000) and the React UI (port 5173). Do not run only `cd frontend && npm run dev` — that starts the UI without the API.
 
 ### 3. Production-style (single server)
 
