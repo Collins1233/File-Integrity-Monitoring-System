@@ -1302,6 +1302,13 @@ body::after {
   color: var(--text-primary);
 }
 
+.file-change-path {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
 .file-change-summary {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -1326,6 +1333,16 @@ body::after {
   letter-spacing: 0.04em;
 }
 
+.file-change-type-badge {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+}
+
 .file-change-body {
   padding: 0 1.25rem 1.25rem;
   border-top: 1px solid var(--border-color);
@@ -1334,7 +1351,160 @@ body::after {
 .file-change-intro {
   color: var(--text-secondary);
   font-size: 0.9rem;
-  margin: 1rem 0;
+  margin: 0.75rem 0 1rem;
+}
+
+.file-change-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.file-change-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.file-change-stat.changed-before {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.file-change-stat.changed-after {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.file-change-legend {
+  margin: 0.85rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.file-change-legend .legend-item.changed-before {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+.file-change-legend .legend-item.changed-after {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.file-change-changes-only {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.file-change-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.file-change-pair-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.file-change-pair-header {
+  padding: 0.55rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-change-pair-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+@media (max-width: 760px) {
+  .file-change-pair-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.file-change-pair-side {
+  padding: 0.85rem 0.95rem;
+  min-width: 0;
+}
+
+.file-change-pair-side.before {
+  border-right: 1px solid var(--border-color);
+  background: rgba(159, 18, 57, 0.04);
+}
+
+.file-change-pair-side.after {
+  background: rgba(35, 78, 58, 0.04);
+}
+
+@media (max-width: 760px) {
+  .file-change-pair-side.before {
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+}
+
+.file-change-pair-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+}
+
+.file-change-pair-side.before .file-change-pair-label {
+  color: var(--color-danger);
+}
+
+.file-change-pair-side.after .file-change-pair-label {
+  color: var(--color-success);
+}
+
+.file-change-pair-side p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.file-change-pair-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.file-compare-grid-compact .file-compare-lines {
+  max-height: 220px;
+}
+
+.file-compare-grid-full .file-compare-lines {
+  max-height: 420px;
+}
+
+.file-compare-line-unchanged {
+  opacity: 0.72;
+}
+
+.file-compare-line-unchanged .file-compare-text {
+  color: var(--text-secondary);
+  font-weight: 400;
 }
 
 .file-change-unavailable {
@@ -1444,6 +1614,147 @@ body::after {
   padding: 1.25rem;
   color: var(--text-muted);
   font-style: italic;
+}
+
+.file-compare-line.file-compare-section {
+  background: var(--bg-card);
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.file-compare-line.file-compare-section .file-compare-text {
+  font-weight: 700;
+}
+
+.file-change-view-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.file-change-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.file-change-view-tab.active {
+  background: var(--color-gold-bg, rgba(180, 140, 60, 0.12));
+  border-color: var(--color-gold);
+  color: var(--text-primary);
+}
+
+.excel-changes-wrap {
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  max-height: 360px;
+}
+
+.excel-changes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.excel-changes-table th,
+.excel-changes-table td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.excel-changes-table th {
+  background: var(--bg-card);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  position: sticky;
+  top: 0;
+}
+
+.excel-changes-table code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.excel-cell-before {
+  color: var(--color-danger);
+  background: rgba(159, 18, 57, 0.05);
+}
+
+.excel-cell-after {
+  color: var(--color-success);
+  background: rgba(35, 78, 58, 0.05);
+}
+
+.file-change-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.file-change-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.file-change-restore-note,
+.file-change-restore-hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.file-change-binary-panel {
+  padding-top: 0.5rem;
+}
+
+.deleted-file-card {
+  padding: 1.25rem 1.5rem;
+  border-left: 4px solid var(--color-danger);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.file-compare-image-wrap {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: var(--bg-card);
+  min-height: 180px;
+}
+
+.file-compare-image {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: #fff;
 }
 
 /* Spin animation */

@@ -46,29 +46,42 @@ function monitorLabel(monitor) {
 }
 
 function FileDetailPanel({ file, onClose, onRestore }) {
-  const [preview, setPreview] = useState(null);
+  const [previewTab, setPreviewTab] = useState('baseline');
+  const [previews, setPreviews] = useState({ baseline: null, current: null });
   const [loading, setLoading] = useState(false);
+  const canPreview = file.is_text_file || file.has_backup;
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.tif', '.tiff'];
+  const isImageFile = imageExtensions.includes((file.extension || '').toLowerCase());
 
   React.useEffect(() => {
     let cancelled = false;
-    if (file.is_text_file) {
+    if (!canPreview) return undefined;
+
+    async function loadPreviews() {
       setLoading(true);
-      fetch(`${API_BASE}/api/files/preview?path=${encodeURIComponent(file.path)}`)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (!cancelled) setPreview(data);
-        })
-        .catch(console.error)
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
+      try {
+        const [baselineRes, currentRes] = await Promise.all([
+          fetch(`${API_BASE}/api/files/preview?path=${encodeURIComponent(file.path)}&version=baseline`),
+          fetch(`${API_BASE}/api/files/preview?path=${encodeURIComponent(file.path)}&version=current`),
+        ]);
+        const baseline = baselineRes.ok ? await baselineRes.json() : null;
+        const current = currentRes.ok ? await currentRes.json() : null;
+        if (!cancelled) setPreviews({ baseline, current });
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
+
+    loadPreviews();
     return () => {
       cancelled = true;
     };
-  }, [file.path, file.is_text_file]);
+  }, [file.path, canPreview]);
 
   const Icon = getFileIcon(file.extension);
+  const activePreview = previews[previewTab];
 
   return (
     <div className="file-detail-panel">
@@ -103,15 +116,43 @@ function FileDetailPanel({ file, onClose, onRestore }) {
 
       {loading && <p className="monitored-file-loading">Loading preview…</p>}
 
-      {!loading && file.is_text_file && preview?.previewable && (
+      {!loading && canPreview && (previews.baseline?.previewable || previews.current?.previewable || isImageFile) && (
         <div className="monitored-file-preview">
-          <div className="monitored-file-preview-header"><Eye size={14} /> Baseline snapshot</div>
-          <pre>{preview.preview}</pre>
+          <div className="file-change-view-tabs" style={{ marginBottom: '0.75rem' }}>
+            <button
+              type="button"
+              className={`file-change-view-tab ${previewTab === 'baseline' ? 'active' : ''}`}
+              onClick={() => setPreviewTab('baseline')}
+            >
+              Original (baseline)
+            </button>
+            <button
+              type="button"
+              className={`file-change-view-tab ${previewTab === 'current' ? 'active' : ''}`}
+              onClick={() => setPreviewTab('current')}
+            >
+              Current (on disk)
+            </button>
+          </div>
+          <div className="monitored-file-preview-header">
+            <Eye size={14} /> {previewTab === 'baseline' ? 'Baseline snapshot' : 'Current file content'}
+          </div>
+          {(activePreview?.preview_mode === 'image' || isImageFile) ? (
+            <div className="file-compare-image-wrap">
+              <img
+                src={`${API_BASE}/api/files/content?path=${encodeURIComponent(file.path)}&version=${previewTab}`}
+                alt={previewTab === 'baseline' ? 'Baseline image' : 'Current image'}
+                className="file-compare-image"
+              />
+            </div>
+          ) : (
+            <pre>{activePreview?.previewable ? activePreview.preview : 'Preview not available for this version.'}</pre>
+          )}
         </div>
       )}
 
-      {!loading && !file.is_text_file && !file.hash_only && (
-        <p className="monitored-file-note">Monitored by digital fingerprint. Office backups support diff on change.</p>
+      {!loading && !canPreview && !file.hash_only && (
+        <p className="monitored-file-note">Monitored by digital fingerprint only. No readable preview is available.</p>
       )}
     </div>
   );

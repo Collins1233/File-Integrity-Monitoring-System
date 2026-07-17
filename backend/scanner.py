@@ -2,12 +2,9 @@ import os
 from datetime import datetime
 
 from hashing import calculate_hash
-from config import SUPPORTED_FILE_TYPES
+from config import SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
 from settings_manager import load_settings
 from scan_progress import scan_progress
-
-TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".log", ".py", ".js", ".html", ".css", ".json", ".xml", ".yaml", ".yml"}
-
 
 def read_text_content(file_path):
     """Read file lines for snapshot storage. Returns [] if binary."""

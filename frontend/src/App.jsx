@@ -106,6 +106,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [folderLoading, setFolderLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
+  const [restoringPath, setRestoringPath] = useState(null);
   const [logs, setLogs] = useState([]);
   const [reports, setReports] = useState([]);
   const [systemLogs, setSystemLogs] = useState([]);
@@ -551,13 +552,14 @@ function App() {
 
   const handleRestoreFile = async (path) => {
     const confirmed = await requestConfirm({
-      title: 'Restore file?',
-      message: 'Restore this file from the baseline backup?',
+      title: 'Restore original file?',
+      message: 'This will undo the changes and replace the current file with the baseline backup.',
       detail: path,
-      confirmLabel: 'Restore',
+      confirmLabel: 'Restore original',
       cancelLabel: 'Cancel',
     });
     if (!confirmed) return;
+    setRestoringPath(path);
     try {
       const res = await fetch(`${API_BASE}/api/files/restore`, {
         method: 'POST',
@@ -567,11 +569,21 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         addConsoleLog(`Restored file from backup: ${path}`, 'success');
+        fetchMonitoredFiles();
+        if (checkResult) {
+          const checkRes = await fetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
+          if (checkRes.ok) {
+            const newResult = await checkRes.json();
+            setCheckResult(newResult);
+          }
+        }
       } else {
         addConsoleLog(`Restore failed: ${data.detail}`, 'danger');
       }
     } catch (err) {
       addConsoleLog(`Restore error: ${err.message}`, 'danger');
+    } finally {
+      setRestoringPath(null);
     }
   };
 
@@ -1074,11 +1086,14 @@ function App() {
                       Changed Files ({checkResult.modified_files.length})
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                      Tap a file to see what it looked like before and what it looks like now.
+                      Tap a file to review what changed, or switch to the full original and current file side by side.
                     </p>
                     <FileChangeViewer
                       modifiedFiles={checkResult.modified_files}
                       textDifferences={checkResult.text_differences}
+                      fileMetadata={checkResult.file_metadata}
+                      onRestore={handleRestoreFile}
+                      restoringPath={restoringPath}
                     />
                   </div>
                 )}
@@ -1092,15 +1107,33 @@ function App() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                       {checkResult.deleted_files.map((file, fIndex) => {
                         const fileName = file.split('/').pop() || file.split('\\').pop();
+                        const canRestore = checkResult.file_metadata?.[file]?.can_restore;
                         return (
-                          <div key={fIndex} className="glass-panel" style={{ padding: '1.25rem 1.5rem', borderLeft: '4px solid var(--color-danger)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                          <div key={fIndex} className="glass-panel deleted-file-card">
                             <span style={{ fontSize: '1.5rem' }}>🗑️</span>
-                            <div style={{ flex: 1 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
                               <p style={{ fontWeight: 700 }}>{fileName}</p>
                               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{file}</p>
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>This file existed when monitoring was set up but can no longer be found. It may have been deleted or moved.</p>
+                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                                This file existed when monitoring was set up but can no longer be found.
+                                {canRestore ? ' You can restore it from the baseline backup.' : ' No backup is available to restore it.'}
+                              </p>
                             </div>
-                            <span style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}>DELETED</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
+                              <span style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700 }}>DELETED</span>
+                              {canRestore && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem' }}
+                                  onClick={() => handleRestoreFile(file)}
+                                  disabled={restoringPath === file}
+                                >
+                                  <RotateCcw size={14} className={restoringPath === file ? 'animate-spin' : ''} />
+                                  {restoringPath === file ? 'Restoring…' : 'Restore file'}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         );
                       })}

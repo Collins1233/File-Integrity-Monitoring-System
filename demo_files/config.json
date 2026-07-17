@@ -1,0 +1,10 @@
+{
+  "app": "File Integrity Monitor",
+  "version": "2.0.0",
+  "monitoring": {
+    "enabled": false,
+    "interval_minutes": 5
+  },
+  "demo": false,
+  "tampered": true
+}

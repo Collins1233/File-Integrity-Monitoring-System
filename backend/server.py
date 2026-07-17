@@ -34,6 +34,8 @@ from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
 from config import APP_VERSION, MAX_REPORTS_RETAINED, PROJECT_ROOT
+from textdiff import read_text_file
+from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FIM_Server")
@@ -439,7 +441,7 @@ def api_get_files(monitor_id: Optional[str] = None):
 
 
 @app.get("/api/files/preview")
-def api_preview_file(path: str, monitor_id: Optional[str] = None):
+def api_preview_file(path: str, monitor_id: Optional[str] = None, version: str = Query("baseline")):
     monitor = get_active_monitor() if not monitor_id else next((m for m in get_monitors() if m["id"] == monitor_id), None)
     if not monitor:
         raise HTTPException(status_code=404, detail="No baseline found.")
@@ -447,23 +449,64 @@ def api_preview_file(path: str, monitor_id: Optional[str] = None):
     if not info:
         raise HTTPException(status_code=404, detail="File not found in monitored baseline.")
 
+    extension = info.get("extension", "")
+    backup_path = info.get("baseline_copy")
     preview = None
     previewable = False
-    if info.get("is_text_file") and info.get("content_snapshot") is not None:
-        preview = "".join(info["content_snapshot"])
-        previewable = True
+    preview_mode = "text"
+
+    if is_image_type(extension):
+        content_path = resolve_content_path(path, version, backup_path)
+        previewable = content_path is not None
+        preview_mode = "image"
+    elif version == "current":
+        if os.path.isfile(path):
+            if info.get("is_text_file") and info.get("content_snapshot") is not None and not info.get("hash_only"):
+                preview = "".join(read_text_file(path))
+                previewable = True
+            else:
+                content_path = path if os.path.isfile(path) else None
+                if content_path:
+                    preview = extract_preview_text(content_path, extension)
+                    previewable = preview is not None
+    else:
+        if info.get("is_text_file") and info.get("content_snapshot") is not None and not info.get("hash_only"):
+            preview = "".join(info["content_snapshot"])
+            previewable = True
+        elif backup_path and os.path.exists(backup_path):
+            preview = extract_preview_text(backup_path, extension)
+            previewable = preview is not None
 
     return {
         "path": path,
         "name": os.path.basename(path),
         "preview": preview,
         "previewable": previewable,
+        "preview_mode": preview_mode,
+        "version": version,
         "file_type": info.get("file_type", "Unknown"),
         "size": info.get("size", 0),
         "last_modified": info.get("last_modified", ""),
         "hash_only": info.get("hash_only", False),
         "has_backup": bool(info.get("baseline_copy")),
+        "extension": extension,
     }
+
+
+@app.get("/api/files/content")
+def api_file_content(path: str, monitor_id: Optional[str] = None, version: str = Query("current")):
+    monitor = get_active_monitor() if not monitor_id else next((m for m in get_monitors() if m["id"] == monitor_id), None)
+    if not monitor:
+        raise HTTPException(status_code=404, detail="No baseline found.")
+    info = monitor.get("files", {}).get(path)
+    if not info:
+        raise HTTPException(status_code=404, detail="File not found in monitored baseline.")
+
+    content_path = resolve_content_path(path, version, info.get("baseline_copy"))
+    if not content_path or not os.path.isfile(content_path):
+        raise HTTPException(status_code=404, detail="File content not available.")
+
+    return FileResponse(content_path, media_type=guess_media_type(content_path), filename=os.path.basename(path))
 
 
 @app.get("/api/monitoring/status")

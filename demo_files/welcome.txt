@@ -1,3 +1,4 @@
-Welcome to the File Integrity Monitor test
-Original line two
-vfv dv. v v d v v d
+Welcome to the File Integrity Monitor demo folder.
+MODIFIED: This line was changed for testing.
+Line three — unchanged baseline content.
+NEW LINE: Added after baseline.

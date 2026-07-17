@@ -1,0 +1,5 @@
+id,name,role,status
+1,Alice,Admin,active
+2,Bob,Superuser,suspended
+3,Carol,Auditor,active
+4,Dave,Intruder,unknown

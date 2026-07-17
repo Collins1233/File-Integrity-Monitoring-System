@@ -6,43 +6,55 @@ from logger import save_log
 from textdiff import read_text_file, format_text_change
 from report import generate_pdf_report
 from scan_progress import scan_progress
-from config import OFFICE_FILE_TYPES
-from comparators import compare_word, compare_excel, compare_powerpoint
+from config import BACKUP_FILE_TYPES
+from file_preview import format_backup_diff
 
 
-def _build_office_diff(file_path, old_info):
+def _build_backup_diff(file_path, old_info):
     backup_path = old_info.get("baseline_copy")
     extension = old_info.get("extension")
     if not backup_path or not os.path.exists(backup_path):
         return None
 
     try:
-        if extension == ".docx":
-            diff_lines = compare_word(backup_path, file_path)
-        elif extension == ".xlsx":
-            diff_lines = compare_excel(backup_path, file_path)
-        elif extension == ".pptx":
-            diff_lines = compare_powerpoint(backup_path, file_path)
-        else:
+        diff = format_backup_diff(backup_path, file_path, extension)
+        if not diff:
+            return None
+        if diff.get("preview_type") != "image" and diff.get("summary", {}).get("total_changes", 0) == 0:
             return None
 
-        if not diff_lines:
-            return None
-
-        return {
-            "before": [line for line in diff_lines if line.startswith("-") or not line.startswith("+")],
-            "after": [line for line in diff_lines if line.startswith("+") or not line.startswith("-")],
-            "office_diff": diff_lines,
-            "summary": {
-                "lines_removed": len([line for line in diff_lines if line.startswith("-")]),
-                "lines_added": len([line for line in diff_lines if line.startswith("+")]),
-                "total_changes": len(diff_lines),
-            },
-            "preview_type": "office",
-        }
+        diff["can_restore"] = True
+        diff["file_type"] = old_info.get("file_type", "File")
+        diff["extension"] = extension
+        return diff
     except Exception as error:
-        save_log(f"[OFFICE DIFF ERROR] {file_path}: {error}")
+        save_log(f"[DIFF ERROR] {file_path}: {error}")
         return None
+
+
+def _build_file_metadata(old_info):
+    backup_path = old_info.get("baseline_copy")
+    return {
+        "can_restore": bool(backup_path and os.path.exists(backup_path)),
+        "file_type": old_info.get("file_type", "Unknown"),
+        "extension": old_info.get("extension", ""),
+        "has_backup": bool(backup_path),
+    }
+
+
+def _build_binary_diff(old_info):
+    return {
+        "preview_type": "binary",
+        "can_restore": bool(old_info.get("baseline_copy") and os.path.exists(old_info["baseline_copy"])),
+        "file_type": old_info.get("file_type", "Unknown"),
+        "extension": old_info.get("extension", ""),
+        "summary": {
+            "lines_removed": 0,
+            "lines_added": 0,
+            "total_changes": 1,
+        },
+        "message": "This file changed. Preview is limited for this format, but you can restore the original if a backup exists.",
+    }
 
 
 def _compare_monitor(monitor, generate_report=True):
@@ -83,24 +95,35 @@ def _compare_monitor(monitor, generate_report=True):
     deleted_files = []
     new_files = []
     text_differences = {}
+    file_metadata = {}
 
     for file_path in old_files:
         if file_path not in current_files:
             deleted_files.append(file_path)
+            file_metadata[file_path] = _build_file_metadata(old_files[file_path])
         elif old_files[file_path]["hash"] != current_files[file_path]["hash"]:
             modified_files.append(file_path)
             old_info = old_files[file_path]
+            file_metadata[file_path] = _build_file_metadata(old_info)
 
-            if old_info.get("is_text_file") and old_info.get("content_snapshot") is not None:
+            if old_info.get("is_text_file") and old_info.get("content_snapshot") and not old_info.get("hash_only"):
                 old_lines = old_info.get("content_snapshot", [])
                 new_lines = read_text_file(file_path)
                 differences = format_text_change(old_lines, new_lines)
                 if differences["summary"]["total_changes"] > 0:
+                    differences["preview_type"] = "text"
+                    differences["can_restore"] = file_metadata[file_path]["can_restore"]
+                    differences["file_type"] = old_info.get("file_type", "Text file")
+                    differences["extension"] = old_info.get("extension", "")
                     text_differences[file_path] = differences
-            elif old_info.get("extension") in OFFICE_FILE_TYPES:
-                office_diff = _build_office_diff(file_path, old_info)
-                if office_diff:
-                    text_differences[file_path] = office_diff
+            elif old_info.get("extension") in BACKUP_FILE_TYPES:
+                backup_diff = _build_backup_diff(file_path, old_info)
+                if backup_diff:
+                    text_differences[file_path] = backup_diff
+                else:
+                    text_differences[file_path] = _build_binary_diff(old_info)
+            else:
+                text_differences[file_path] = _build_binary_diff(old_info)
 
     for file_path in current_files:
         if file_path not in old_files:
@@ -142,6 +165,7 @@ def _compare_monitor(monitor, generate_report=True):
         "deleted_files": deleted_files,
         "new_files": new_files,
         "text_differences": text_differences,
+        "file_metadata": file_metadata,
         "report_path": report_path,
         "auto_check": not generate_report,
     }
@@ -168,6 +192,7 @@ def run_integrity_check(generate_report=True, monitor_id=None):
     combined_deleted = []
     combined_new = []
     combined_diffs = {}
+    combined_metadata = {}
     report_paths = []
 
     for result in results:
@@ -177,6 +202,7 @@ def run_integrity_check(generate_report=True, monitor_id=None):
         combined_deleted.extend(result["deleted_files"])
         combined_new.extend(result["new_files"])
         combined_diffs.update(result.get("text_differences", {}))
+        combined_metadata.update(result.get("file_metadata", {}))
         if result.get("report_path"):
             report_paths.append(result["report_path"])
 
@@ -192,6 +218,7 @@ def run_integrity_check(generate_report=True, monitor_id=None):
         "deleted_files": combined_deleted,
         "new_files": combined_new,
         "text_differences": combined_diffs,
+        "file_metadata": combined_metadata,
         "report_path": report_paths[-1] if report_paths else None,
         "report_paths": report_paths,
         "monitor_results": results,
