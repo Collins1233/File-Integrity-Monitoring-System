@@ -132,6 +132,7 @@ function App() {
     () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
   );
   const seenAlertIds = useRef(new Set());
+  const hasConnectedOnce = useRef(false);
   const statusFailCount = useRef(0);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
@@ -259,12 +260,19 @@ function App() {
     }
   };
 
+  const markServerOffline = useCallback(() => {
+    if (hasConnectedOnce.current && statusFailCount.current >= 2) {
+      setServerOnline(false);
+    }
+  }, []);
+
   // Fetch status, reports, and logs
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
+      hasConnectedOnce.current = true;
       statusFailCount.current = 0;
       setServerOnline(true);
       setStatus(data);
@@ -272,12 +280,10 @@ function App() {
       setActiveMonitorId(data.active_monitor_id || null);
     } catch (err) {
       statusFailCount.current += 1;
-      if (statusFailCount.current >= 2) {
-        setServerOnline(false);
-      }
+      markServerOffline();
       console.error('Error fetching status:', err);
     }
-  }, []);
+  }, [markServerOffline]);
 
   const fetchReports = async () => {
     try {
@@ -328,6 +334,8 @@ function App() {
   }, [darkMode]);
 
   useEffect(() => {
+    let cancelled = false;
+
     fetchStatus();
     fetchReports();
     fetchLogs();
@@ -335,10 +343,18 @@ function App() {
     fetchMonitoredFiles();
     requestNotificationPermission();
 
+    const startupGrace = setTimeout(() => {
+      if (!cancelled && !hasConnectedOnce.current) {
+        setServerOnline(false);
+      }
+    }, 8000);
+
     const monitoringInterval = setInterval(fetchMonitoring, 30000);
     const healthInterval = setInterval(fetchStatus, 10000);
     const progressInterval = setInterval(fetchScanProgress, 1500);
     return () => {
+      cancelled = true;
+      clearTimeout(startupGrace);
       clearInterval(monitoringInterval);
       clearInterval(healthInterval);
       clearInterval(progressInterval);
@@ -349,17 +365,13 @@ function App() {
     if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
   }, [activeTab, status.has_baseline, activeMonitorId]);
 
-  useEffect(() => {
-    if (activeTab === 'settings') {
-      fetchStatus();
-    }
-  }, [activeTab, fetchStatus]);
-
   const refreshMonitorState = async (monitorId) => {
     try {
       const res = await fetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
+      hasConnectedOnce.current = true;
+      statusFailCount.current = 0;
       setServerOnline(true);
       setStatus(data);
       setMonitors(data.monitors || []);
@@ -368,9 +380,7 @@ function App() {
       await fetchMonitoredFiles(nextActiveId);
     } catch (err) {
       statusFailCount.current += 1;
-      if (statusFailCount.current >= 2) {
-        setServerOnline(false);
-      }
+      markServerOffline();
       console.error('Error refreshing monitor state:', err);
     }
   };
