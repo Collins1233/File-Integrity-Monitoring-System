@@ -375,7 +375,9 @@ function App() {
           `Baseline ${action}: ${data.file_count} files snapshotted (${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total).`,
           'success'
         );
-        setFolderPathInput('');
+        if (data.folder_path) {
+          setFolderPathInput(data.folder_path);
+        }
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();

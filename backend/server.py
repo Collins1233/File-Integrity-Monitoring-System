@@ -237,6 +237,7 @@ def select_folder():
     import platform
 
     os_name = platform.system()
+    picker_timeout = 10
 
     try:
         if os_name == "Darwin":
@@ -247,30 +248,42 @@ def select_folder():
                 'set chosen to choose folder with prompt "Select the folder to monitor:"\n'
                 'POSIX path of chosen'
             )
-            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=picker_timeout)
             folder_path = result.stdout.strip()
         elif os_name == "Windows":
             ps_script = (
                 'Add-Type -AssemblyName System.Windows.Forms; '
                 '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
                 '$d.Description = "Select Directory to Monitor"; '
+                '$d.ShowNewFolderButton = $false; '
                 'if ($d.ShowDialog() -eq "OK") { Write-Output $d.SelectedPath }'
             )
-            result = subprocess.run(["powershell", "-NonInteractive", "-Command", ps_script], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Sta", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                timeout=picker_timeout,
+            )
             folder_path = result.stdout.strip()
         else:
             try:
-                result = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Select Directory to Monitor"], capture_output=True, text=True, timeout=120)
+                result = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Select Directory to Monitor"], capture_output=True, text=True, timeout=picker_timeout)
                 folder_path = result.stdout.strip()
             except FileNotFoundError:
-                result = subprocess.run(["kdialog", "--getexistingdirectory", "/", "--title", "Select Directory to Monitor"], capture_output=True, text=True, timeout=120)
+                result = subprocess.run(["kdialog", "--getexistingdirectory", "/", "--title", "Select Directory to Monitor"], capture_output=True, text=True, timeout=picker_timeout)
                 folder_path = result.stdout.strip()
 
         if folder_path:
             return create_baseline_for_folder(folder_path)
         return {"folder_path": "", "info": "Folder selection was cancelled."}
     except subprocess.TimeoutExpired:
-        return {"folder_path": "", "info": "Folder dialog timed out. Please try again."}
+        logger.warning("Folder picker timed out; falling back to manual path entry.")
+        return {
+            "folder_path": "",
+            "info": "Folder picker could not open in this environment. Please paste the folder path manually in the text box and click Add.",
+        }
+    except FileNotFoundError:
+        return {"folder_path": "", "info": "Native folder picker is not available on this system. Please paste the folder path manually."}
     except Exception as error:
         logger.error("Folder picker failed: %s", error)
         raise HTTPException(status_code=500, detail=str(error))
@@ -313,6 +326,7 @@ def select_files():
     import platform
 
     os_name = platform.system()
+    picker_timeout = 10
 
     try:
         if os_name == "Darwin":
@@ -327,7 +341,7 @@ def select_files():
                 'end repeat\n'
                 'return output'
             )
-            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=picker_timeout)
             file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         elif os_name == "Windows":
             ps_script = (
@@ -337,14 +351,19 @@ def select_files():
                 '$d.Title = "Select Files to Monitor"; '
                 'if ($d.ShowDialog() -eq "OK") { $d.FileNames -join "`n" }'
             )
-            result = subprocess.run(["powershell", "-NonInteractive", "-Command", ps_script], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Sta", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                timeout=picker_timeout,
+            )
             file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         else:
             result = subprocess.run(
                 ["zenity", "--file-selection", "--multiple", "--separator=|", "--title=Select Files to Monitor"],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=picker_timeout,
             )
             file_paths = [part.strip() for part in result.stdout.split("|") if part.strip()]
 
@@ -352,9 +371,10 @@ def select_files():
             return create_baseline_for_files(file_paths)
         return {"folder_path": "", "info": "File selection was cancelled."}
     except subprocess.TimeoutExpired:
-        return {"folder_path": "", "info": "File dialog timed out. Please try again."}
+        logger.warning("File picker timed out; falling back to manual path entry.")
+        return {"folder_path": "", "info": "File picker could not open in this environment. Please use the manual path entry instead."}
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Native file picker is not available on this system.")
+        return {"folder_path": "", "info": "Native file picker is not available on this system."}
     except Exception as error:
         logger.error("File picker failed: %s", error)
         raise HTTPException(status_code=500, detail=str(error))
