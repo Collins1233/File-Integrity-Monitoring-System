@@ -93,5 +93,55 @@ def scan_folder_with_options(folder_path, track_progress=False, operation="Scann
     return file_data
 
 
+def scan_files_with_options(file_paths, track_progress=False, operation="Scanning files"):
+    """Scan an explicit list of file paths (not a whole folder walk)."""
+    settings = load_settings()
+    hash_only_enabled = settings.get("hash_only_enabled", True)
+    hash_only_size = settings.get("hash_only_size_bytes", 1048576)
+
+    file_data = {}
+    pending_paths = [path for path in file_paths if path and os.path.isfile(path)]
+    total = len(pending_paths)
+
+    if track_progress:
+        scan_progress.start(operation, total)
+
+    for index, file_path in enumerate(pending_paths, start=1):
+        if track_progress:
+            scan_progress.update(index, total, file_path)
+
+        try:
+            print(f"Scanning: {file_path}")
+            extension = os.path.splitext(file_path)[1].lower()
+            file_size = os.path.getsize(file_path)
+            is_text = extension in TEXT_EXTENSIONS
+            use_hash_only = hash_only_enabled and file_size >= hash_only_size
+            content_snapshot = []
+            if is_text and not use_hash_only:
+                content_snapshot = read_text_content(file_path)
+
+            file_data[file_path] = {
+                "hash": calculate_hash(file_path),
+                "extension": extension,
+                "file_type": SUPPORTED_FILE_TYPES.get(extension, "Unsupported File"),
+                "size": file_size,
+                "last_modified": datetime.fromtimestamp(
+                    os.path.getmtime(file_path)
+                ).strftime("%Y-%m-%d %H:%M:%S"),
+                "is_text_file": is_text,
+                "content_snapshot": content_snapshot,
+                "hash_only": use_hash_only,
+            }
+        except PermissionError:
+            print(f"Permission denied: {file_path}")
+        except Exception as error:
+            print(f"Could not scan {file_path}: {error}")
+
+    if track_progress:
+        scan_progress.finish()
+
+    return file_data
+
+
 def scan_folder(folder_path):
     return scan_folder_with_options(folder_path)

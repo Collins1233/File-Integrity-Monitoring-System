@@ -16,6 +16,7 @@ from datetime import datetime
 from scanner import scan_folder_with_options
 from baseline_store import (
     add_monitor,
+    add_files_monitor,
     get_active_monitor,
     get_monitors,
     set_active_monitor,
@@ -23,10 +24,12 @@ from baseline_store import (
     accept_monitor_changes,
     restore_file,
     legacy_load_baseline as load_baseline,
+    normalize_folder_path,
 )
 from integrity import run_integrity_check
 from monitor import monitor_service
 from report import list_reports, delete_report_file, prune_old_reports
+from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
 from config import APP_VERSION, MAX_REPORTS_RETAINED
@@ -57,6 +60,9 @@ app.add_middleware(
 class FolderRequest(BaseModel):
     folder_path: str
 
+class FilesRequest(BaseModel):
+    file_paths: list[str]
+
 class MonitoringToggleRequest(BaseModel):
     enabled: bool
 
@@ -69,6 +75,7 @@ class SettingsUpdateRequest(BaseModel):
     excluded_extensions: Optional[list[str]] = None
     hash_only_enabled: Optional[bool] = None
     hash_only_size_bytes: Optional[int] = None
+    max_reports_retained: Optional[int] = None
 
 class ActiveMonitorRequest(BaseModel):
     monitor_id: str
@@ -95,9 +102,11 @@ def _status_payload():
         "monitors": [
             {
                 "id": monitor["id"],
+                "monitor_type": monitor.get("monitor_type", "folder"),
                 "folder_path": monitor["folder_path"],
                 "created_at": monitor["created_at"],
                 "file_count": len(monitor["files"]),
+                "watch_paths": monitor.get("watch_paths", []),
             }
             for monitor in monitors
         ],
@@ -105,14 +114,44 @@ def _status_payload():
 
 
 def create_baseline_for_folder(folder_path: str) -> dict:
-    monitor = add_monitor(folder_path, set_active=True)
+    try:
+        normalized = normalize_folder_path(folder_path)
+        monitor = add_monitor(normalized, set_active=True)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    is_new = monitor.pop("is_new_monitor", True)
+    action = "created" if is_new else "refreshed"
+    save_log(
+        f"[BASELINE {action.upper()}] {monitor['folder_path']} "
+        f"({len(monitor['files'])} files, {len(get_monitors())} monitor(s))"
+    )
+
+    return {
+        "success": True,
+        "baseline_created": True,
+        "is_new_monitor": is_new,
+        "monitor_id": monitor["id"],
+        "monitor_type": monitor.get("monitor_type", "folder"),
+        "folder_path": monitor["folder_path"],
+        "created_at": monitor["created_at"],
+        "file_count": len(monitor["files"]),
+        "monitor_count": len(get_monitors()),
+    }
+
+
+def create_baseline_for_files(file_paths: list[str]) -> dict:
+    monitor = add_files_monitor(file_paths, set_active=True)
     return {
         "success": True,
         "baseline_created": True,
         "monitor_id": monitor["id"],
+        "monitor_type": monitor.get("monitor_type", "files"),
         "folder_path": monitor["folder_path"],
         "created_at": monitor["created_at"],
         "file_count": len(monitor["files"]),
+        "monitor_count": len(get_monitors()),
+        "watch_paths": monitor.get("watch_paths", []),
     }
 
 
@@ -128,11 +167,18 @@ def api_get_settings():
 
 
 @app.put("/api/settings")
-def api_update_settings(request: SettingsUpdateRequest):
+async def api_update_settings(request: SettingsUpdateRequest):
     payload = {key: value for key, value in request.model_dump().items() if value is not None}
     settings = save_settings(payload)
     monitor_service.reload_settings()
-    return {"success": True, "settings": settings, "app_version": APP_VERSION}
+    await monitor_service.restart_loop()
+    removed = prune_old_reports(settings.get("max_reports_retained"))
+    return {
+        "success": True,
+        "settings": settings,
+        "app_version": APP_VERSION,
+        "reports_pruned": len(removed),
+    }
 
 
 @app.get("/api/scan/progress")
@@ -223,10 +269,86 @@ def select_folder():
 
 @app.post("/api/create-baseline")
 def api_create_baseline(request: FolderRequest):
-    folder_path = request.folder_path
+    folder_path = normalize_folder_path(request.folder_path) if request.folder_path else ""
     if not folder_path or not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="Invalid folder path provided.")
     return create_baseline_for_folder(folder_path)
+
+
+@app.post("/api/monitors/folder")
+def api_add_folder_monitor(request: FolderRequest):
+    if not request.folder_path or not request.folder_path.strip():
+        raise HTTPException(status_code=400, detail="Enter a folder path.")
+    folder_path = normalize_folder_path(request.folder_path)
+    if not os.path.isdir(folder_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Folder not found: {folder_path}. Use a full path or a folder name inside the project.",
+        )
+    return create_baseline_for_folder(folder_path)
+
+
+@app.post("/api/monitors/files")
+def api_add_files_monitor(request: FilesRequest):
+    if not request.file_paths:
+        raise HTTPException(status_code=400, detail="Provide at least one file path.")
+    try:
+        return create_baseline_for_files(request.file_paths)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/select-files")
+def select_files():
+    import subprocess
+    import platform
+
+    os_name = platform.system()
+
+    try:
+        if os_name == "Darwin":
+            apple_script = (
+                'tell application "System Events"\n'
+                '    activate\n'
+                'end tell\n'
+                'set chosen to choose file with prompt "Select files to monitor:" with multiple selections allowed\n'
+                'set output to ""\n'
+                'repeat with f in chosen\n'
+                '    set output to output & (POSIX path of f) & linefeed\n'
+                'end repeat\n'
+                'return output'
+            )
+            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=120)
+            file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        elif os_name == "Windows":
+            ps_script = (
+                'Add-Type -AssemblyName System.Windows.Forms; '
+                '$d = New-Object System.Windows.Forms.OpenFileDialog; '
+                '$d.Multiselect = $true; '
+                '$d.Title = "Select Files to Monitor"; '
+                'if ($d.ShowDialog() -eq "OK") { $d.FileNames -join "`n" }'
+            )
+            result = subprocess.run(["powershell", "-NonInteractive", "-Command", ps_script], capture_output=True, text=True, timeout=120)
+            file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        else:
+            result = subprocess.run(
+                ["zenity", "--file-selection", "--multiple", "--separator=|", "--title=Select Files to Monitor"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            file_paths = [part.strip() for part in result.stdout.split("|") if part.strip()]
+
+        if file_paths:
+            return create_baseline_for_files(file_paths)
+        return {"folder_path": "", "info": "File selection was cancelled."}
+    except subprocess.TimeoutExpired:
+        return {"folder_path": "", "info": "File dialog timed out. Please try again."}
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Native file picker is not available on this system.")
+    except Exception as error:
+        logger.error("File picker failed: %s", error)
+        raise HTTPException(status_code=500, detail=str(error))
 
 
 @app.post("/api/check-integrity")
@@ -256,12 +378,16 @@ def api_get_files(monitor_id: Optional[str] = None):
         return {"folder_path": "", "monitor_id": None, "files": []}
 
     folder_path = monitor["folder_path"]
+    monitor_type = monitor.get("monitor_type", "folder")
     files = []
     for path, info in monitor.get("files", {}).items():
-        try:
-            relative_path = os.path.relpath(path, folder_path)
-        except ValueError:
+        if monitor_type == "files":
             relative_path = path
+        else:
+            try:
+                relative_path = os.path.relpath(path, folder_path)
+            except ValueError:
+                relative_path = path
         files.append({
             "name": os.path.basename(path),
             "path": path,
@@ -275,7 +401,12 @@ def api_get_files(monitor_id: Optional[str] = None):
             "has_backup": bool(info.get("baseline_copy")),
         })
     files.sort(key=lambda item: item["relative_path"].lower())
-    return {"folder_path": folder_path, "monitor_id": monitor["id"], "files": files}
+    return {
+        "folder_path": folder_path,
+        "monitor_id": monitor["id"],
+        "monitor_type": monitor_type,
+        "files": files,
+    }
 
 
 @app.get("/api/files/preview")

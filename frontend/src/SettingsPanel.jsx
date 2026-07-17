@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, Moon, Sun } from 'lucide-react';
+import { Settings, Moon, Sun, CheckCircle, AlertCircle } from 'lucide-react';
 
 const API_BASE = window.location.origin.includes(':517') ? 'http://127.0.0.1:8000' : '';
 
@@ -14,6 +14,8 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const [excludedText, setExcludedText] = useState('');
+  const [saveMessage, setSaveMessage] = useState(null);
+  const [saveError, setSaveError] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/settings`)
@@ -27,26 +29,44 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
 
   const handleSave = async () => {
     setSaving(true);
+    setSaveMessage(null);
+    setSaveError(null);
+
+    const intervalMinutes = Math.max(1, Number(settings.monitoring_interval_seconds) / 60);
+    const hashMb = Math.max(1, Number(settings.hash_only_size_bytes) / (1024 * 1024));
+    const maxReports = Math.min(50, Math.max(1, Number(settings.max_reports_retained)));
+
     try {
       const payload = {
-        ...settings,
-        monitoring_interval_seconds: Number(settings.monitoring_interval_seconds),
-        hash_only_size_bytes: Number(settings.hash_only_size_bytes),
-        max_reports_retained: Number(settings.max_reports_retained),
+        monitoring_interval_seconds: intervalMinutes * 60,
+        monitoring_enabled: settings.monitoring_enabled,
+        hash_only_enabled: settings.hash_only_enabled,
+        hash_only_size_bytes: hashMb * 1024 * 1024,
+        max_reports_retained: maxReports,
         excluded_extensions: excludedText.split(',').map((item) => item.trim()).filter(Boolean),
       };
+
       const res = await fetch(`${API_BASE}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+
       if (res.ok) {
         setSettings(data.settings);
+        setExcludedText((data.settings.excluded_extensions || []).join(', '));
+        const interval = Math.round(data.settings.monitoring_interval_seconds / 60);
+        const pruned = data.reports_pruned ? `, ${data.reports_pruned} old report(s) removed` : '';
+        setSaveMessage(
+          `Saved. Checks every ${interval} min, monitoring ${data.settings.monitoring_enabled ? 'on' : 'off'}${pruned}.`
+        );
         onSaved?.(data.settings);
+      } else {
+        setSaveError(data.detail || 'Could not save settings.');
       }
     } catch (error) {
-      console.error(error);
+      setSaveError(error.message || 'Could not save settings.');
     } finally {
       setSaving(false);
     }
@@ -55,6 +75,22 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
   return (
     <section className="glass-panel settings-panel">
       <h3 className="card-title"><Settings size={18} /> Settings</h3>
+      <p className="settings-intro">
+        These options are saved to the server and apply to the next scan. Background monitoring restarts automatically when you save.
+      </p>
+
+      {saveMessage && (
+        <div className="settings-feedback success">
+          <CheckCircle size={16} />
+          <span>{saveMessage}</span>
+        </div>
+      )}
+      {saveError && (
+        <div className="settings-feedback error">
+          <AlertCircle size={16} />
+          <span>{saveError}</span>
+        </div>
+      )}
 
       <div className="settings-grid">
         <label>
@@ -63,17 +99,17 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
             type="number"
             min="1"
             value={Math.round(settings.monitoring_interval_seconds / 60)}
-            onChange={(e) => setSettings({ ...settings, monitoring_interval_seconds: Number(e.target.value) * 60 })}
+            onChange={(e) => setSettings({ ...settings, monitoring_interval_seconds: Math.max(1, Number(e.target.value)) * 60 })}
           />
         </label>
 
         <label>
-          Hash-only threshold (MB)
+          Hash only threshold (MB)
           <input
             type="number"
             min="1"
             value={Math.round(settings.hash_only_size_bytes / (1024 * 1024))}
-            onChange={(e) => setSettings({ ...settings, hash_only_size_bytes: Number(e.target.value) * 1024 * 1024 })}
+            onChange={(e) => setSettings({ ...settings, hash_only_size_bytes: Math.max(1, Number(e.target.value)) * 1024 * 1024 })}
           />
         </label>
 
@@ -82,7 +118,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
           <input
             type="number"
             min="1"
-            max="20"
+            max="50"
             value={settings.max_reports_retained}
             onChange={(e) => setSettings({ ...settings, max_reports_retained: Number(e.target.value) })}
           />
@@ -103,7 +139,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
             checked={settings.hash_only_enabled}
             onChange={(e) => setSettings({ ...settings, hash_only_enabled: e.target.checked })}
           />
-          Hash-only mode for large text files
+          Hash only mode for large text files
         </label>
 
         <label className="settings-full">

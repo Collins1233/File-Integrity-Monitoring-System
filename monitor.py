@@ -212,6 +212,11 @@ class MonitorService:
         settings = load_settings()
         self.interval = settings.get("monitoring_interval_seconds", MONITORING_INTERVAL_SECONDS)
         self.enabled = settings.get("monitoring_enabled", ENABLE_REALTIME_MONITORING)
+        self._set_next_check()
+
+    async def restart_loop(self) -> None:
+        await self.stop()
+        self.start()
 
 
 monitor_service = MonitorService()

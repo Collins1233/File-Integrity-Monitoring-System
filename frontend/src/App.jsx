@@ -22,7 +22,9 @@ import {
   Trash2,
   RotateCcw,
   Eye,
-  HelpCircle
+  HelpCircle,
+  FileStack,
+  Plus
 } from 'lucide-react';
 
 import FileChangeViewer from './FileChangeViewer';
@@ -31,7 +33,9 @@ import MonitoredFilesPanel from './MonitoredFilesPanel';
 import VersionGate from './VersionGate';
 import OnboardingWizard from './OnboardingWizard';
 import SettingsPanel from './SettingsPanel';
-import HelpPanel from './HelpPanel';
+import HelpTour from './HelpTour';
+import AppHeader from './AppHeader';
+import ConfirmDialog from './ConfirmDialog';
 import {
   formatAlertTitle,
   getAffectedFiles,
@@ -40,13 +44,52 @@ import {
 const API_BASE = window.location.origin.includes(':517') ? 'http://127.0.0.1:8000' : '';
 const APP_ICON = `${API_BASE || window.location.origin}/favicon.svg`;
 
+function sanitizeFolderPath(rawPath) {
+  return rawPath.trim().replace(/^["']|["']$/g, '');
+}
+
+function formatApiError(detail, fallback = 'Request failed') {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || item.message || JSON.stringify(item)).join(', ');
+  }
+  return fallback;
+}
+
 const PAGE_LABELS = {
   dashboard: 'Overview',
   files: 'Monitored Files',
   logs: 'System Logs',
   reports: 'Reports Archive',
   settings: 'Settings',
-  help: 'Help & Guide',
+  help: 'Guided Tour',
+};
+
+const HEADER_META = {
+  dashboard: {
+    title: 'Overview',
+    subtitle: 'Monitor folders and files, run checks, and review changes.',
+  },
+  files: {
+    title: 'Monitored Files',
+    subtitle: 'Search, preview, and restore files from your baselines.',
+  },
+  logs: {
+    title: 'System Logs',
+    subtitle: 'Audit trail of scans, alerts, and system events.',
+  },
+  reports: {
+    title: 'Reports Archive',
+    subtitle: 'Preview and download integrity PDF reports.',
+  },
+  settings: {
+    title: 'Settings',
+    subtitle: 'Adjust monitoring schedule, exclusions, and retention.',
+  },
+  help: {
+    title: 'Guided Tour',
+    subtitle: 'Walk through every part of the dashboard step by step.',
+  },
 };
 
 function App() {
@@ -60,6 +103,7 @@ function App() {
   
   const [folderPathInput, setFolderPathInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [folderLoading, setFolderLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [logs, setLogs] = useState([]);
   const [reports, setReports] = useState([]);
@@ -83,7 +127,23 @@ function App() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fim_dark_mode') === 'true');
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('fim_onboarding_done'));
   const [previewReport, setPreviewReport] = useState(null);
+  const [notificationPermission, setNotificationPermission] = useState(
+    () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
+  );
   const seenAlertIds = useRef(new Set());
+  const confirmResolver = useRef(null);
+  const [confirmState, setConfirmState] = useState(null);
+
+  const requestConfirm = useCallback((options) => new Promise((resolve) => {
+    confirmResolver.current = resolve;
+    setConfirmState({ ...options, open: true });
+  }), []);
+
+  const closeConfirm = useCallback((result) => {
+    confirmResolver.current?.(result);
+    confirmResolver.current = null;
+    setConfirmState(null);
+  }, []);
 
   const addConsoleLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -144,7 +204,7 @@ function App() {
           addToast(alert);
           const affectedNames = getAffectedFiles(alert).map((file) => file.name).join(', ');
           addConsoleLog(
-            `Auto-check alert: ${formatAlertTitle(alert)} (${affectedNames || 'no file names'})`,
+            `Auto check alert: ${formatAlertTitle(alert)} (${affectedNames || 'no file names'})`,
             'danger'
           );
         }
@@ -172,9 +232,28 @@ function App() {
     }
   };
 
-  const requestNotificationPermission = () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) return;
+    const result = await Notification.requestPermission();
+    setNotificationPermission(result);
+    if (result === 'granted') {
+      addConsoleLog('Browser notifications enabled.', 'success');
+    }
+  };
+
+  const dismissAllToasts = async () => {
+    const ids = toasts.map((toast) => toast.id);
+    setToasts([]);
+    if (ids.length) {
+      try {
+        await fetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ alert_ids: ids }),
+        });
+      } catch (err) {
+        console.error('Error acknowledging alerts:', err);
+      }
     }
   };
 
@@ -188,7 +267,6 @@ function App() {
       setStatus(data);
       setMonitors(data.monitors || []);
       setActiveMonitorId(data.active_monitor_id || null);
-      if (data.folder_path) setFolderPathInput(data.folder_path);
     } catch (err) {
       setServerOnline(false);
       console.error('Error fetching status:', err);
@@ -265,34 +343,147 @@ function App() {
     if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
   }, [activeTab, status.has_baseline, activeMonitorId]);
 
+  const refreshMonitorState = async (monitorId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/status`);
+      if (!res.ok) throw new Error('offline');
+      const data = await res.json();
+      setServerOnline(true);
+      setStatus(data);
+      setMonitors(data.monitors || []);
+      const nextActiveId = monitorId || data.active_monitor_id || null;
+      setActiveMonitorId(nextActiveId);
+      await fetchMonitoredFiles(nextActiveId);
+    } catch (err) {
+      setServerOnline(false);
+      console.error('Error refreshing monitor state:', err);
+    }
+  };
+
   // Actions
   const handleSelectFolder = async () => {
-    setLoading(true);
+    setFolderLoading(true);
     try {
       addConsoleLog('Opening folder picker…', 'info');
       const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
       const data = await res.json();
       if (data.success && data.baseline_created) {
-        setFolderPathInput(data.folder_path);
-        addConsoleLog(`Monitoring started for: ${data.folder_path}`, 'success');
-        addConsoleLog(`Baseline created automatically — ${data.file_count} files snapshotted.`, 'success');
-        addConsoleLog('Background checks run every 20 minutes. Use Check Now anytime.', 'info');
-        await fetchStatus();
+        addConsoleLog(`Folder added: ${data.folder_path}`, 'success');
+        const action = data.is_new_monitor ? 'created' : 'refreshed';
+        addConsoleLog(
+          `Baseline ${action}: ${data.file_count} files snapshotted (${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total).`,
+          'success'
+        );
+        setFolderPathInput('');
+        await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
-        fetchMonitoredFiles();
       } else if (data.info) {
         addConsoleLog(data.info, 'warning');
       } else if (data.error) {
         addConsoleLog(`Native folder picker failed: ${data.error}`, 'warning');
       } else if (!res.ok) {
-        addConsoleLog(`Failed to start monitoring: ${data.detail || 'Unknown error'}`, 'danger');
+        addConsoleLog(`Failed to add folder: ${data.detail || 'Unknown error'}`, 'danger');
       }
     } catch (err) {
       console.error(err);
       addConsoleLog(`Error using folder picker: ${err.message}`, 'warning');
     } finally {
-      setLoading(false);
+      setFolderLoading(false);
+    }
+  };
+
+  const handleSelectFiles = async () => {
+    setFolderLoading(true);
+    try {
+      addConsoleLog('Opening file picker with multiple selection…', 'info');
+      const res = await fetch(`${API_BASE}/api/select-files`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success && data.baseline_created) {
+        addConsoleLog(`Files added: ${data.file_count} selected`, 'success');
+        addConsoleLog(data.folder_path, 'info');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      } else if (data.info) {
+        addConsoleLog(data.info, 'warning');
+      } else if (!res.ok) {
+        addConsoleLog(`Failed to add files: ${data.detail || 'Unknown error'}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error using file picker: ${err.message}`, 'warning');
+    } finally {
+      setFolderLoading(false);
+    }
+  };
+
+  const handleAddFolderPath = async (event) => {
+    event?.preventDefault?.();
+    const path = sanitizeFolderPath(folderPathInput);
+    if (!path) {
+      addConsoleLog('Enter a folder path first.', 'warning');
+      return;
+    }
+    setFolderLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/monitors/folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: path }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const action = data.is_new_monitor ? 'added' : 'already monitored (baseline refreshed)';
+        addConsoleLog(`Folder ${action}: ${data.folder_path}`, data.is_new_monitor ? 'success' : 'warning');
+        addConsoleLog(`${data.file_count} files in baseline. ${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total.`, 'success');
+        setFolderPathInput('');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      } else {
+        addConsoleLog(`Could not add folder: ${formatApiError(data.detail, 'Invalid or missing folder path')}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error adding folder: ${err.message}`, 'danger');
+    } finally {
+      setFolderLoading(false);
+    }
+  };
+
+  const handleRemoveMonitor = async (monitorId, label) => {
+    const confirmed = await requestConfirm({
+      title: 'Remove monitor?',
+      message: 'Stop monitoring and remove this target?',
+      detail: label,
+      confirmLabel: 'Remove',
+      cancelLabel: 'Keep monitoring',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/monitors/${encodeURIComponent(monitorId)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addConsoleLog(`Removed monitor: ${label}`, 'warning');
+        setMonitors(data.monitors || []);
+        setActiveMonitorId(data.active_monitor_id || null);
+        setStatus((prev) => ({
+          ...prev,
+          has_baseline: (data.monitors || []).length > 0,
+          monitor_count: data.monitor_count,
+          active_monitor_id: data.active_monitor_id,
+          folder_path: data.folder_path || '',
+          file_count: data.file_count || 0,
+          created_at: data.created_at || '',
+        }));
+        await fetchMonitoredFiles(data.active_monitor_id);
+      } else {
+        addConsoleLog(`Could not remove monitor: ${data.detail}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error removing monitor: ${err.message}`, 'danger');
     }
   };
 
@@ -306,9 +497,9 @@ function App() {
         setCheckResult(data);
         const totalChanges = data.modified_files.length + data.deleted_files.length + data.new_files.length;
         if (totalChanges === 0) {
-          addConsoleLog('Check complete — all files match the baseline.', 'success');
+          addConsoleLog('Check complete. All files match the baseline.', 'success');
         } else {
-          addConsoleLog(`Check complete — ${data.modified_files.length} modified, ${data.deleted_files.length} deleted, ${data.new_files.length} new.`, 'danger');
+          addConsoleLog(`Check complete: ${data.modified_files.length} modified, ${data.deleted_files.length} deleted, ${data.new_files.length} new.`, 'danger');
         }
         fetchReports();
         fetchLogs();
@@ -324,7 +515,13 @@ function App() {
   };
 
   const handleAcceptBaseline = async () => {
-    if (!window.confirm('Accept current files as the new baseline? Future checks will compare against this snapshot.')) return;
+    const confirmed = await requestConfirm({
+      title: 'Accept new baseline?',
+      message: 'Accept current files as the new baseline? Future checks will compare against this snapshot.',
+      confirmLabel: 'Accept baseline',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/baseline/accept`, {
@@ -334,7 +531,7 @@ function App() {
       });
       const data = await res.json();
       if (res.ok) {
-        addConsoleLog(`Baseline updated — ${data.file_count} files snapshotted.`, 'success');
+        addConsoleLog(`Baseline updated: ${data.file_count} files snapshotted.`, 'success');
         setCheckResult(null);
         fetchStatus();
         fetchMonitoredFiles();
@@ -350,7 +547,14 @@ function App() {
   };
 
   const handleRestoreFile = async (path) => {
-    if (!window.confirm(`Restore this file from the baseline backup?\n\n${path}`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Restore file?',
+      message: 'Restore this file from the baseline backup?',
+      detail: path,
+      confirmLabel: 'Restore',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`${API_BASE}/api/files/restore`, {
         method: 'POST',
@@ -384,7 +588,14 @@ function App() {
   };
 
   const handleDeleteReport = async (filename) => {
-    if (!window.confirm(`Delete report "${filename}"?`)) return;
+    const confirmed = await requestConfirm({
+      title: 'Delete report?',
+      message: `Delete report "${filename}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
 
     try {
       const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`, {
@@ -410,7 +621,7 @@ function App() {
   };
 
   return (
-    <div className="app-container">
+    <div className="app-shell">
       <VersionGate />
       <OnboardingWizard
         open={showOnboarding}
@@ -425,22 +636,35 @@ function App() {
         }}
       />
 
+      <AppHeader
+        pageTitle={HEADER_META[activeTab]?.title || 'Overview'}
+        version="2.0.0"
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode((value) => !value)}
+        onStartTour={() => setActiveTab('help')}
+        serverOnline={serverOnline}
+        pendingAlertCount={toasts.length || monitoring.pending_alert_count}
+        notificationPermission={notificationPermission}
+        onEnableNotifications={requestNotificationPermission}
+        onDismissAlerts={dismissAllToasts}
+      />
+
       {!serverOnline && (
         <div className="server-offline-banner">
-          Cannot reach the monitoring server. Start it with <code>python3 server.py</code> — reconnecting…
+          Cannot reach the monitoring server. Start it with <code>python3 server.py</code>. Reconnecting…
         </div>
       )}
 
       {scanProgress.active && (
         <div className="scan-progress-banner">
           <div className="scan-progress-text">
-            {scanProgress.operation || 'Scanning'} — {scanProgress.percent}% ({scanProgress.current}/{scanProgress.total})
+            {scanProgress.operation || 'Scanning'}: {scanProgress.percent}% ({scanProgress.current}/{scanProgress.total})
           </div>
           <div className="scan-progress-bar"><span style={{ width: `${scanProgress.percent}%` }} /></div>
           {scanProgress.current_file && <div className="scan-progress-file">{scanProgress.current_file}</div>}
         </div>
       )}
-      {/* Toast notifications */}
+
       <div className="toast-container">
         {toasts.map(alert => (
           <ToastNotification
@@ -452,13 +676,10 @@ function App() {
           />
         ))}
       </div>
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="brand-section">
-          <Shield size={32} className="brand-logo" />
-          <span className="brand-name">FIM Dashboard</span>
-        </div>
 
+      <div className="app-container">
+      {/* Sidebar */}
+      <aside className="sidebar shell-chrome">
         <nav className="sidebar-nav">
           <button 
             className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
@@ -500,50 +721,35 @@ function App() {
             onClick={() => setActiveTab('help')}
           >
             <HelpCircle size={18} />
-            Help
+            Tour
           </button>
         </nav>
-
-        <div style={{ marginTop: 'auto', padding: '1rem 0', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <Settings size={16} className="text-muted" />
-          <span className="text-muted" style={{ fontSize: '0.8rem' }}>FIM System v2.0.0</span>
-        </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="main-content">
-        <header className="header-container">
-          <div>
-            <h1 className="header-title">
-              {activeTab === 'dashboard' && "File Integrity Dashboard"}
-              {activeTab === 'files' && "Monitored Files"}
-              {activeTab === 'logs' && "Audit Log Registry"}
-              {activeTab === 'reports' && "Generated Report Archive"}
-              {activeTab === 'settings' && "Settings"}
-              {activeTab === 'help' && "Help & Guide"}
-            </h1>
-            <p className="header-subtitle">
-              {activeTab === 'dashboard' && "Real-time monitoring stats, baseline builder, and discrepancy viewer."}
-              {activeTab === 'files' && "Browse every file included in your monitoring baseline and preview text content."}
-              {activeTab === 'logs' && "Historical log registry capturing monitoring activities and integrity events."}
-              {activeTab === 'reports' && "Download and inspect detailed PDF integrity reports generated by FIM."}
-              {activeTab === 'settings' && "Configure monitoring, exclusions, and appearance."}
-              {activeTab === 'help' && "Step-by-step guide to every feature in the FIM Dashboard."}
-            </p>
+          {loading && (
+            <div className="main-loading glass-panel">
+              <RefreshCw className="animate-spin" size={16} />
+              <span>Processing…</span>
+            </div>
+          )}
 
-            {status.has_baseline && activeTab === 'dashboard' && (
-              <div className="monitoring-status-bar">
+        {activeTab === 'dashboard' && (
+          <>
+            {status.has_baseline && (
+              <div className="monitoring-status-bar page-toolbar">
                 <div className={`monitoring-pill ${monitoring.active ? 'active' : 'paused'}`}>
                   <Radio size={14} className={monitoring.is_checking ? 'animate-spin' : ''} />
                   {monitoring.is_checking
                     ? 'Scanning now…'
                     : monitoring.active
-                      ? `Auto-check every ${monitoring.interval_minutes} min`
+                      ? `Auto check every ${monitoring.interval_minutes} min`
                       : 'Monitoring paused'}
                 </div>
                 <div className="monitoring-times">
                   <span>Last: {formatCheckTime(monitoring.last_check_at)}</span>
-                  <span>Next: {monitoring.active ? formatCheckTime(monitoring.next_check_at) : '—'}</span>
+                  <span>Next: {monitoring.active ? formatCheckTime(monitoring.next_check_at) : 'N/A'}</span>
                 </div>
                 <button
                   className="btn btn-primary"
@@ -564,18 +770,7 @@ function App() {
                 </button>
               </div>
             )}
-          </div>
-          
-          {loading && (
-            <div className="glass-panel" style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-primary)' }}>
-              <RefreshCw className="animate-spin" size={16} />
-              <span>Processing...</span>
-            </div>
-          )}
-        </header>
 
-        {activeTab === 'dashboard' && (
-          <>
             {/* Stats Grid */}
             <section className="stats-grid">
               <div className="glass-panel stat-card stat-card-clickable" onClick={() => setActiveTab('files')} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setActiveTab('files')}>
@@ -584,7 +779,7 @@ function App() {
                 </div>
                 <div className="stat-info">
                   <span className="stat-value">{status.file_count}</span>
-                  <span className="stat-label">Files Monitored · View</span>
+                  <span className="stat-label">Files Monitored, View</span>
                 </div>
               </div>
 
@@ -622,57 +817,116 @@ function App() {
             {/* Actions Panel */}
             <section className="dashboard-actions">
               <div className="glass-panel action-card">
-                <h3 className="card-title"><Folder size={18} className="text-info" /> Monitored Workspace</h3>
+                <h3 className="card-title"><Folder size={18} className="text-info" /> Monitored Targets</h3>
 
-                {/* Big Browse Button */}
                 {!status.has_baseline ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '1.5rem 0' }}>
-                    <button 
-                      className="btn btn-primary" 
-                      onClick={handleSelectFolder} 
-                      disabled={loading}
-                      style={{ fontSize: '1.05rem', padding: '1.1rem 2.5rem', gap: '0.75rem' }}
-                    >
-                      <Folder size={22} />
-                      {loading ? 'Opening folder picker…' : 'Browse & Start Monitoring'}
-                    </button>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center' }}>
-                      Pick a folder — monitoring and baseline snapshot start automatically.
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleSelectFolder}
+                        disabled={folderLoading}
+                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                      >
+                        <Folder size={20} />
+                        {folderLoading ? 'Opening…' : 'Add Folder'}
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleSelectFiles}
+                        disabled={folderLoading}
+                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                      >
+                        <FileStack size={20} />
+                        Add Files
+                      </button>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '420px' }}>
+                      Add one or more folders, or pick specific files. You can combine both. Each target gets its own baseline.
                     </p>
+                    <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
+                      <input
+                        type="text"
+                        placeholder="Or paste a folder path…"
+                        value={folderPathInput}
+                        onChange={(e) => setFolderPathInput(e.target.value)}
+                        disabled={folderLoading}
+                      />
+                      <button type="submit" className="btn btn-secondary" disabled={folderLoading}>
+                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add'}
+                      </button>
+                    </form>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    {/* Currently Monitored Folder pill */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'var(--bg-tertiary)', borderRadius: '8px', padding: '0.85rem 1.1rem', border: '1px solid var(--border-color)' }}>
-                      <Folder size={20} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
-                      <span style={{ fontSize: '0.9rem', fontWeight: 600, wordBreak: 'break-all', color: 'var(--text-primary)' }}>{status.folder_path}</span>
+                    <div className="monitor-list">
+                      {monitors.map((monitor) => (
+                        <div
+                          key={monitor.id}
+                          className={`monitor-list-item ${monitor.id === activeMonitorId ? 'active' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="monitor-list-main"
+                            onClick={() => handleSelectMonitor(monitor.id)}
+                          >
+                            {monitor.monitor_type === 'files' ? <FileStack size={18} /> : <Folder size={18} />}
+                            <div>
+                              <span className="monitor-list-label">
+                                {monitor.monitor_type === 'files' ? 'Files' : 'Folder'}
+                              </span>
+                              <span className="monitor-list-path">{monitor.folder_path}</span>
+                              <span className="monitor-list-meta">{monitor.file_count} files</span>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary monitor-list-remove"
+                            onClick={() => handleRemoveMonitor(monitor.id, monitor.folder_path)}
+                            title="Remove monitor"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
+
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={handleCheckNow} 
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleCheckNow}
                         disabled={loading || monitoring.is_checking}
                         style={{ flex: 1 }}
                       >
                         <Zap size={18} />
                         {loading || monitoring.is_checking ? 'Checking…' : 'Check Now'}
                       </button>
-                      <button 
-                        className="btn btn-secondary" 
-                        onClick={() => setActiveTab('files')}
-                      >
+                      <button className="btn btn-secondary" onClick={() => setActiveTab('files')}>
                         <Files size={16} />
                         View Files
                       </button>
-                      <button 
-                        className="btn btn-secondary" 
-                        onClick={handleSelectFolder} 
-                        disabled={loading}
-                      >
+                      <button className="btn btn-secondary" onClick={handleSelectFolder} disabled={folderLoading}>
                         <Folder size={16} />
-                        Change Folder
+                        {folderLoading ? 'Adding…' : 'Add Folder'}
+                      </button>
+                      <button className="btn btn-secondary" onClick={handleSelectFiles} disabled={folderLoading}>
+                        <FileStack size={16} />
+                        Add Files
                       </button>
                     </div>
+
+                    <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
+                      <input
+                        type="text"
+                        placeholder="Paste another folder path…"
+                        value={folderPathInput}
+                        onChange={(e) => setFolderPathInput(e.target.value)}
+                        disabled={folderLoading}
+                      />
+                      <button type="submit" className="btn btn-secondary" disabled={folderLoading}>
+                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add folder'}
+                      </button>
+                    </form>
                   </div>
                 )}
               </div>
@@ -691,7 +945,11 @@ function App() {
                     <span className="text-primary">{status.created_at || 'N/A'}</span>
                   </div>
                   <div>
-                    <span className="text-muted">Location: </span>
+                    <span className="text-muted">Monitors: </span>
+                    <span className="text-primary">{status.monitor_count || monitors.length || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted">Active target: </span>
                     <span className="text-primary" style={{ wordBreak: 'break-all' }}>{status.folder_path || 'None'}</span>
                   </div>
                 </div>
@@ -721,7 +979,7 @@ function App() {
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && "Action Required: File Changes Detected"}
                   </h3>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-                    {!status.has_baseline && "Pick a folder above — a baseline snapshot is created automatically."}
+                    {!status.has_baseline && "Pick a folder above. A baseline snapshot is created automatically."}
                     {status.has_baseline && !checkResult && "Monitoring is active. Checks run every 20 minutes, or click Check Now for an immediate scan."}
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length === 0) && "All monitored files are intact. No unauthorized changes or modifications were found."}
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && `We found ${checkResult.modified_files.length} modified, ${checkResult.deleted_files.length} deleted, and ${checkResult.new_files.length} new files. See details below.`}
@@ -787,7 +1045,7 @@ function App() {
                 {checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && (
                   <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                     <button type="button" className="btn btn-primary" onClick={handleAcceptBaseline} disabled={loading}>
-                      <RotateCcw size={16} /> Accept changes & update baseline
+                      <RotateCcw size={16} /> Accept changes and update baseline
                     </button>
                   </div>
                 )}
@@ -990,10 +1248,27 @@ function App() {
           />
         )}
 
-        {activeTab === 'help' && (
-          <HelpPanel onNavigate={setActiveTab} />
-        )}
       </main>
+      </div>
+
+      {activeTab === 'help' && (
+        <HelpTour
+          onNavigate={setActiveTab}
+          onClose={() => setActiveTab('dashboard')}
+        />
+      )}
+
+      <ConfirmDialog
+        open={Boolean(confirmState?.open)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        detail={confirmState?.detail}
+        confirmLabel={confirmState?.confirmLabel}
+        cancelLabel={confirmState?.cancelLabel}
+        variant={confirmState?.variant}
+        onConfirm={() => closeConfirm(true)}
+        onCancel={() => closeConfirm(false)}
+      />
     </div>
   );
 }

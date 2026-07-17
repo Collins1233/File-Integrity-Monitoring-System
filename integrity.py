@@ -1,7 +1,7 @@
 import os
 
 from baseline_store import get_monitors, legacy_load_baseline as load_baseline
-from scanner import scan_folder_with_options
+from scanner import scan_folder_with_options, scan_files_with_options
 from logger import save_log
 from textdiff import read_text_file, format_text_change
 from report import generate_pdf_report
@@ -46,20 +46,38 @@ def _build_office_diff(file_path, old_info):
 
 
 def _compare_monitor(monitor, generate_report=True):
+    monitor_type = monitor.get("monitor_type", "folder")
     folder_path = monitor["folder_path"]
-    if not os.path.isdir(folder_path):
-        return {
-            "success": False,
-            "monitor_id": monitor["id"],
-            "message": f"The monitored folder no longer exists: {folder_path}",
-        }
-
     old_files = monitor["files"]
-    current_files = scan_folder_with_options(
-        folder_path,
-        track_progress=True,
-        operation=f"Checking {os.path.basename(folder_path.rstrip('/'))}",
-    )
+
+    if monitor_type == "files":
+        watch_paths = monitor.get("watch_paths") or list(old_files.keys())
+        missing = [path for path in watch_paths if not os.path.isfile(path)]
+        if missing:
+            return {
+                "success": False,
+                "monitor_id": monitor["id"],
+                "message": f"Monitored file no longer exists: {missing[0]}",
+            }
+
+        current_files = scan_files_with_options(
+            watch_paths,
+            track_progress=True,
+            operation=f"Checking {len(watch_paths)} selected files",
+        )
+    else:
+        if not os.path.isdir(folder_path):
+            return {
+                "success": False,
+                "monitor_id": monitor["id"],
+                "message": f"The monitored folder no longer exists: {folder_path}",
+            }
+
+        current_files = scan_folder_with_options(
+            folder_path,
+            track_progress=True,
+            operation=f"Checking {os.path.basename(folder_path.rstrip('/'))}",
+        )
 
     modified_files = []
     deleted_files = []
@@ -88,6 +106,9 @@ def _compare_monitor(monitor, generate_report=True):
         if file_path not in old_files:
             new_files.append(file_path)
 
+    if monitor_type == "files":
+        new_files = []
+
     for file_path in modified_files:
         save_log(f"[MODIFIED] {file_path}")
     for file_path in deleted_files:
@@ -96,7 +117,7 @@ def _compare_monitor(monitor, generate_report=True):
         save_log(f"[NEW FILE] {file_path}")
 
     save_log(
-        f"[SUMMARY] {folder_path} — Modified: {len(modified_files)}, "
+        f"[SUMMARY] {folder_path}: Modified: {len(modified_files)}, "
         f"Deleted: {len(deleted_files)}, New: {len(new_files)}"
     )
 

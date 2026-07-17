@@ -6,8 +6,8 @@ export default function OnboardingWizard({ open, onClose, onStart }) {
   const steps = [
     {
       icon: Folder,
-      title: 'Pick a folder',
-      text: 'Choose any folder to monitor. A baseline snapshot is created automatically — no extra steps.',
+      title: 'Add folders or files',
+      text: 'Add one or more folders, or pick specific files. Each target gets its own baseline automatically.',
     },
     {
       icon: Zap,
@@ -21,7 +21,7 @@ export default function OnboardingWizard({ open, onClose, onStart }) {
     },
     {
       icon: Shield,
-      title: 'Review & accept',
+      title: 'Review and accept',
       text: 'See what changed, restore files from backup, or accept changes to update your baseline.',
     },
   ];

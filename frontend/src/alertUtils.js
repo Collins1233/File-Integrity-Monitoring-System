@@ -83,7 +83,7 @@ export function formatAlertSummary(alert) {
   } else if (alert.new_count > 1) {
     parts.push(`${alert.new_count} new files`);
   }
-  return parts.join(' · ');
+  return parts.join(', ');
 }
 
 export function formatAlertTime(timestamp) {
