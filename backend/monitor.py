@@ -216,6 +216,7 @@ class MonitorService:
 
     async def restart_loop(self) -> None:
         await self.stop()
+        await asyncio.sleep(0.5)
         self.start()
 
 

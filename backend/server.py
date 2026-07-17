@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -162,23 +163,31 @@ def get_status():
 
 @app.get("/api/settings")
 def api_get_settings():
-    settings = load_settings()
-    return {"app_version": APP_VERSION, **settings}
+    try:
+        settings = load_settings()
+        return {"app_version": APP_VERSION, **settings}
+    except (OSError, json.JSONDecodeError) as error:
+        logger.error("Failed to load settings: %s", error)
+        raise HTTPException(status_code=500, detail="Could not read settings file.")
 
 
 @app.put("/api/settings")
 async def api_update_settings(request: SettingsUpdateRequest):
-    payload = {key: value for key, value in request.model_dump().items() if value is not None}
-    settings = save_settings(payload)
-    monitor_service.reload_settings()
-    await monitor_service.restart_loop()
-    removed = prune_old_reports(settings.get("max_reports_retained"))
-    return {
-        "success": True,
-        "settings": settings,
-        "app_version": APP_VERSION,
-        "reports_pruned": len(removed),
-    }
+    try:
+        payload = {key: value for key, value in request.model_dump().items() if value is not None}
+        settings = save_settings(payload)
+        monitor_service.reload_settings()
+        asyncio.create_task(monitor_service.restart_loop())
+        removed = prune_old_reports(settings.get("max_reports_retained"))
+        return {
+            "success": True,
+            "settings": settings,
+            "app_version": APP_VERSION,
+            "reports_pruned": len(removed),
+        }
+    except OSError as error:
+        logger.error("Failed to save settings: %s", error)
+        raise HTTPException(status_code=500, detail="Could not save settings file.")
 
 
 @app.get("/api/scan/progress")

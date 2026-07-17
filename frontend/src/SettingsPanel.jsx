@@ -3,6 +3,18 @@ import { Settings, Moon, Sun, CheckCircle, AlertCircle } from 'lucide-react';
 
 import { API_BASE } from './api';
 
+function normalizeSettings(data) {
+  const { app_version: _version, ...settings } = data;
+  return {
+    monitoring_interval_seconds: settings.monitoring_interval_seconds ?? 1200,
+    monitoring_enabled: settings.monitoring_enabled ?? true,
+    excluded_extensions: settings.excluded_extensions ?? ['.tmp', '.swp', '.DS_Store'],
+    hash_only_enabled: settings.hash_only_enabled ?? true,
+    hash_only_size_bytes: settings.hash_only_size_bytes ?? 1048576,
+    max_reports_retained: settings.max_reports_retained ?? 5,
+  };
+}
+
 export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
   const [settings, setSettings] = useState({
     monitoring_interval_seconds: 1200,
@@ -12,19 +24,46 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
     hash_only_size_bytes: 1048576,
     max_reports_retained: 5,
   });
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [excludedText, setExcludedText] = useState('');
   const [saveMessage, setSaveMessage] = useState(null);
   const [saveError, setSaveError] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/settings`)
-      .then((res) => res.json())
-      .then((data) => {
-        setSettings(data);
-        setExcludedText((data.excluded_extensions || []).join(', '));
-      })
-      .catch(console.error);
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      setLoading(true);
+      setLoadError(null);
+
+      try {
+        const res = await fetch(`${API_BASE}/api/settings`);
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Could not load settings.');
+        }
+        if (cancelled) return;
+
+        const normalized = normalizeSettings(data);
+        setSettings(normalized);
+        setExcludedText((normalized.excluded_extensions || []).join(', '));
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error.message || 'Could not load settings.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSave = async () => {
@@ -54,14 +93,15 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
       const data = await res.json();
 
       if (res.ok) {
-        setSettings(data.settings);
-        setExcludedText((data.settings.excluded_extensions || []).join(', '));
-        const interval = Math.round(data.settings.monitoring_interval_seconds / 60);
+        const normalized = normalizeSettings(data.settings);
+        setSettings(normalized);
+        setExcludedText((normalized.excluded_extensions || []).join(', '));
+        const interval = Math.round(normalized.monitoring_interval_seconds / 60);
         const pruned = data.reports_pruned ? `, ${data.reports_pruned} old report(s) removed` : '';
         setSaveMessage(
-          `Saved. Checks every ${interval} min, monitoring ${data.settings.monitoring_enabled ? 'on' : 'off'}${pruned}.`
+          `Saved. Checks every ${interval} min, monitoring ${normalized.monitoring_enabled ? 'on' : 'off'}${pruned}.`
         );
-        onSaved?.(data.settings);
+        onSaved?.(normalized);
       } else {
         setSaveError(data.detail || 'Could not save settings.');
       }
@@ -72,12 +112,28 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
     }
   };
 
+  if (loading) {
+    return (
+      <section className="glass-panel settings-panel">
+        <h3 className="card-title"><Settings size={18} /> Settings</h3>
+        <p className="text-muted">Loading settings…</p>
+      </section>
+    );
+  }
+
   return (
     <section className="glass-panel settings-panel">
       <h3 className="card-title"><Settings size={18} /> Settings</h3>
       <p className="settings-intro">
         These options are saved to the server and apply to the next scan. Background monitoring restarts automatically when you save.
       </p>
+
+      {loadError && (
+        <div className="settings-feedback error">
+          <AlertCircle size={16} />
+          <span>{loadError}</span>
+        </div>
+      )}
 
       {saveMessage && (
         <div className="settings-feedback success">
@@ -158,7 +214,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
           {darkMode ? <Sun size={16} /> : <Moon size={16} />}
           {darkMode ? 'Light mode' : 'Dark mode'}
         </button>
-        <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
+        <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || Boolean(loadError)}>
           {saving ? 'Saving…' : 'Save settings'}
         </button>
       </div>

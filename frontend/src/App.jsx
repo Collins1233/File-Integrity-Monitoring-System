@@ -132,6 +132,7 @@ function App() {
     () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
   );
   const seenAlertIds = useRef(new Set());
+  const statusFailCount = useRef(0);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
 
@@ -259,20 +260,24 @@ function App() {
   };
 
   // Fetch status, reports, and logs
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
+      statusFailCount.current = 0;
       setServerOnline(true);
       setStatus(data);
       setMonitors(data.monitors || []);
       setActiveMonitorId(data.active_monitor_id || null);
     } catch (err) {
-      setServerOnline(false);
+      statusFailCount.current += 1;
+      if (statusFailCount.current >= 2) {
+        setServerOnline(false);
+      }
       console.error('Error fetching status:', err);
     }
-  };
+  }, []);
 
   const fetchReports = async () => {
     try {
@@ -338,11 +343,17 @@ function App() {
       clearInterval(healthInterval);
       clearInterval(progressInterval);
     };
-  }, [fetchMonitoring]);
+  }, [fetchMonitoring, fetchStatus]);
 
   useEffect(() => {
     if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
   }, [activeTab, status.has_baseline, activeMonitorId]);
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      fetchStatus();
+    }
+  }, [activeTab, fetchStatus]);
 
   const refreshMonitorState = async (monitorId) => {
     try {
@@ -356,7 +367,10 @@ function App() {
       setActiveMonitorId(nextActiveId);
       await fetchMonitoredFiles(nextActiveId);
     } catch (err) {
-      setServerOnline(false);
+      statusFailCount.current += 1;
+      if (statusFailCount.current >= 2) {
+        setServerOnline(false);
+      }
       console.error('Error refreshing monitor state:', err);
     }
   };
@@ -1247,6 +1261,7 @@ function App() {
             onToggleDarkMode={() => setDarkMode((value) => !value)}
             onSaved={() => {
               addConsoleLog('Settings saved.', 'success');
+              fetchStatus();
               fetchMonitoring();
             }}
           />
