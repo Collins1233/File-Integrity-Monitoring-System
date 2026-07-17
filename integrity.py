@@ -2,7 +2,7 @@ import os
 from baseline import load_baseline
 from scanner import scan_folder
 from logger import save_log
-from textdiff import compare_text
+from textdiff import compare_text, format_text_change
 from report import generate_pdf_report
 
 
@@ -48,9 +48,9 @@ def run_integrity_check(generate_report=True):
                 from textdiff import read_text_file
                 new_lines = read_text_file(file_path)
 
-                differences = compare_text(old_lines, new_lines)
+                differences = format_text_change(old_lines, new_lines)
 
-                if differences:
+                if differences["summary"]["total_changes"] > 0:
                     text_differences[file_path] = differences
 
     for file_path in current_files:
@@ -122,8 +122,17 @@ def check_integrity():
             if file_path in text_differences:
                 print("\nExact Text Changes")
                 print("----------------------------------------")
-                for line in text_differences[file_path]:
-                    print(line)
+                diff = text_differences[file_path]
+                if isinstance(diff, dict):
+                    print("Before:")
+                    for line in diff.get("before", []):
+                        print(f"  {line}")
+                    print("After:")
+                    for line in diff.get("after", []):
+                        print(f"  {line}")
+                else:
+                    for line in diff:
+                        print(line)
 
         for file_path in deleted_files:
             print(f"[DELETED] {file_path}")

@@ -35,6 +35,7 @@ BASELINE_FOLDER = "baseline_files"
 # =========================================================
 
 REPORT_FOLDER = "reports"
+MAX_REPORTS_RETAINED = 5
 REPORT_TITLE = "FILE INTEGRITY MONITOR REPORT"
 
 # =========================================================

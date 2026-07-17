@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -47,6 +48,27 @@ class MonitorService:
 
         self._last_alert_fingerprint = fingerprint
         self._alert_id += 1
+
+        affected_files = []
+        for file_path in result["modified_files"]:
+            affected_files.append({
+                "name": os.path.basename(file_path),
+                "path": file_path,
+                "change": "modified",
+            })
+        for file_path in result["deleted_files"]:
+            affected_files.append({
+                "name": os.path.basename(file_path),
+                "path": file_path,
+                "change": "deleted",
+            })
+        for file_path in result["new_files"]:
+            affected_files.append({
+                "name": os.path.basename(file_path),
+                "path": file_path,
+                "change": "new",
+            })
+
         alert = {
             "id": self._alert_id,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -62,6 +84,7 @@ class MonitorService:
             "modified_files": result["modified_files"],
             "deleted_files": result["deleted_files"],
             "new_files": result["new_files"],
+            "affected_files": affected_files,
             "text_differences": result.get("text_differences", {}),
         }
         self._pending_alerts.append(alert)

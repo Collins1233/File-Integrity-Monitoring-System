@@ -16,6 +16,8 @@ from scanner import scan_folder
 from baseline import BASELINE_FILE, load_baseline
 from integrity import run_integrity_check
 from monitor import monitor_service
+from report import list_reports, delete_report_file, prune_old_reports
+from config import MAX_REPORTS_RETAINED
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +50,28 @@ class MonitoringToggleRequest(BaseModel):
 
 class AcknowledgeAlertsRequest(BaseModel):
     alert_ids: Optional[list[int]] = None
+
+
+def create_baseline_for_folder(folder_path: str) -> dict:
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    files = scan_folder(folder_path)
+
+    baseline = {
+        "folder_path": folder_path,
+        "created_at": created_at,
+        "files": files,
+    }
+
+    with open(BASELINE_FILE, "w", encoding="utf-8") as file:
+        json.dump(baseline, file, indent=4)
+
+    return {
+        "success": True,
+        "baseline_created": True,
+        "folder_path": folder_path,
+        "created_at": created_at,
+        "file_count": len(files),
+    }
 
 @app.get("/api/status")
 def get_status():
@@ -122,7 +146,12 @@ def select_folder():
                 folder_path = result.stdout.strip()
 
         if folder_path:
-            return {"folder_path": folder_path}
+            try:
+                baseline = create_baseline_for_folder(folder_path)
+                return baseline
+            except Exception as e:
+                logger.error(f"Baseline creation failed after folder pick: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
         else:
             return {"folder_path": "", "info": "Folder selection was cancelled."}
 
@@ -138,26 +167,9 @@ def api_create_baseline(request: FolderRequest):
     folder_path = request.folder_path
     if not folder_path or not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="Invalid folder path provided.")
-    
+
     try:
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        files = scan_folder(folder_path)
-        
-        baseline = {
-            "folder_path": folder_path,
-            "created_at": created_at,
-            "files": files
-        }
-        
-        with open(BASELINE_FILE, "w", encoding="utf-8") as file:
-            json.dump(baseline, file, indent=4)
-            
-        return {
-            "success": True,
-            "folder_path": folder_path,
-            "created_at": created_at,
-            "file_count": len(files)
-        }
+        return create_baseline_for_folder(folder_path)
     except Exception as e:
         logger.error(f"Error creating baseline: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -170,6 +182,78 @@ def api_check_integrity():
     except Exception as e:
         logger.error(f"Error checking integrity: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/monitoring/check-now")
+async def api_check_now():
+    if not load_baseline():
+        raise HTTPException(status_code=400, detail="No baseline found. Select a folder first.")
+
+    result = await monitor_service.run_check(generate_report=True)
+    if result is None:
+        raise HTTPException(status_code=409, detail="A check is already running. Please wait.")
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Check failed."))
+    return result
+
+
+@app.get("/api/files")
+def api_get_files():
+    baseline = load_baseline()
+    if not baseline:
+        return {"folder_path": "", "files": []}
+
+    folder_path = baseline.get("folder_path", "")
+    files = []
+
+    for path, info in baseline.get("files", {}).items():
+        try:
+            relative_path = os.path.relpath(path, folder_path)
+        except ValueError:
+            relative_path = path
+
+        files.append({
+            "name": os.path.basename(path),
+            "path": path,
+            "relative_path": relative_path,
+            "size": info.get("size", 0),
+            "extension": info.get("extension", ""),
+            "file_type": info.get("file_type", "Unknown"),
+            "last_modified": info.get("last_modified", ""),
+            "is_text_file": info.get("is_text_file", False),
+        })
+
+    files.sort(key=lambda item: item["relative_path"].lower())
+    return {"folder_path": folder_path, "files": files}
+
+
+@app.get("/api/files/preview")
+def api_preview_file(path: str):
+    baseline = load_baseline()
+    if not baseline:
+        raise HTTPException(status_code=404, detail="No baseline found.")
+
+    files = baseline.get("files", {})
+    if path not in files:
+        raise HTTPException(status_code=404, detail="File not found in monitored baseline.")
+
+    info = files[path]
+    preview = None
+    previewable = False
+
+    if info.get("is_text_file") and info.get("content_snapshot") is not None:
+        preview = "".join(info["content_snapshot"])
+        previewable = True
+
+    return {
+        "path": path,
+        "name": os.path.basename(path),
+        "preview": preview,
+        "previewable": previewable,
+        "file_type": info.get("file_type", "Unknown"),
+        "size": info.get("size", 0),
+        "last_modified": info.get("last_modified", ""),
+    }
+
 
 @app.get("/api/monitoring/status")
 def api_monitoring_status():
@@ -191,31 +275,42 @@ def api_monitoring_toggle(request: MonitoringToggleRequest):
 
 @app.get("/api/reports")
 def api_get_reports():
-    reports_dir = "reports"
-    if not os.path.exists(reports_dir):
-        return []
-    
-    files = []
-    for f in os.listdir(reports_dir):
-        if f.endswith(".pdf"):
-            full_path = os.path.join(reports_dir, f)
-            stat = os.stat(full_path)
-            files.append({
-                "filename": f,
-                "created_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                "size_bytes": stat.st_size
-            })
-    # Sort by created time descending
-    files.sort(key=lambda x: x["created_at"], reverse=True)
-    return files
+    prune_old_reports()
+    reports = list_reports()
+    return [
+        {
+            "filename": report["filename"],
+            "created_at": report["created_at"],
+            "size_bytes": report["size_bytes"],
+        }
+        for report in reports
+    ]
+
 
 @app.get("/api/reports/{filename}")
 def api_download_report(filename: str):
-    reports_dir = "reports"
-    file_path = os.path.join(reports_dir, filename)
+    file_path = os.path.join("reports", filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Report file not found.")
     return FileResponse(file_path, media_type="application/pdf", filename=filename)
+
+
+@app.delete("/api/reports/{filename}")
+def api_delete_report(filename: str):
+    try:
+        deleted = delete_report_file(filename)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Report file not found.")
+
+    return {
+        "success": True,
+        "deleted": filename,
+        "remaining": len(list_reports()),
+        "max_retained": MAX_REPORTS_RETAINED,
+    }
 
 @app.get("/api/logs")
 def api_get_logs():

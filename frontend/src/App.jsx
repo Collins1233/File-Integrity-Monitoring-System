@@ -16,11 +16,29 @@ import {
   HardDrive,
   Bell,
   BellOff,
-  X,
-  Radio
+  Radio,
+  Files,
+  Zap,
+  Trash2
 } from 'lucide-react';
 
+import FileChangeViewer from './FileChangeViewer';
+import ToastNotification from './ToastNotification';
+import MonitoredFilesPanel from './MonitoredFilesPanel';
+import {
+  formatAlertTitle,
+  getAffectedFiles,
+} from './alertUtils';
+
 const API_BASE = window.location.origin.includes(':517') ? 'http://127.0.0.1:8000' : '';
+const APP_ICON = `${API_BASE || window.location.origin}/favicon.svg`;
+
+const PAGE_LABELS = {
+  dashboard: 'Overview',
+  files: 'Monitored Files',
+  logs: 'System Logs',
+  reports: 'Reports Archive',
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -47,6 +65,8 @@ function App() {
     pending_alert_count: 0,
   });
   const [toasts, setToasts] = useState([]);
+  const [monitoredFiles, setMonitoredFiles] = useState([]);
+  const [filesLoading, setFilesLoading] = useState(false);
   const seenAlertIds = useRef(new Set());
 
   const addConsoleLog = useCallback((message, type = 'info') => {
@@ -61,9 +81,16 @@ function App() {
     });
 
     if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('File Integrity Alert', {
-        body: `${alert.total_changes} change(s): ${alert.modified_count} modified, ${alert.deleted_count} deleted, ${alert.new_count} new`,
-        icon: '/favicon.svg',
+      const affected = getAffectedFiles(alert);
+      const fileLine = affected.length
+        ? affected.map((file) => file.name).join(', ')
+        : 'Unknown file';
+
+      new Notification('FIM Dashboard', {
+        body: `${formatAlertTitle(alert)}\n${fileLine}`,
+        icon: APP_ICON,
+        badge: APP_ICON,
+        tag: `fim-alert-${alert.id}`,
       });
     }
   }, []);
@@ -99,8 +126,9 @@ function App() {
         if (!seenAlertIds.current.has(alert.id)) {
           seenAlertIds.current.add(alert.id);
           addToast(alert);
+          const affectedNames = getAffectedFiles(alert).map((file) => file.name).join(', ');
           addConsoleLog(
-            `Auto-check alert: ${alert.modified_count} modified, ${alert.deleted_count} deleted, ${alert.new_count} new`,
+            `Auto-check alert: ${formatAlertTitle(alert)} (${affectedNames || 'no file names'})`,
             'danger'
           );
         }
@@ -168,49 +196,59 @@ function App() {
     }
   };
 
+  const fetchMonitoredFiles = async () => {
+    setFilesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/files`);
+      const data = await res.json();
+      setMonitoredFiles(data.files || []);
+    } catch (err) {
+      console.error('Error fetching monitored files:', err);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchReports();
     fetchLogs();
     fetchMonitoring();
+    fetchMonitoredFiles();
     requestNotificationPermission();
 
     const interval = setInterval(fetchMonitoring, 30000);
     return () => clearInterval(interval);
   }, [fetchMonitoring]);
 
+  useEffect(() => {
+    if (activeTab === 'files' && status.has_baseline) {
+      fetchMonitoredFiles();
+    }
+  }, [activeTab, status.has_baseline]);
+
   // Actions
   const handleSelectFolder = async () => {
     setLoading(true);
     try {
+      addConsoleLog('Opening folder picker…', 'info');
       const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
       const data = await res.json();
-      if (data.folder_path) {
+      if (data.success && data.baseline_created) {
         setFolderPathInput(data.folder_path);
-        addConsoleLog(`Folder selected: ${data.folder_path}`, 'info');
-        
-        // Automatically create baseline immediately
-        addConsoleLog(`Automatically creating baseline for: ${data.folder_path}...`, 'info');
-        const baseRes = await fetch(`${API_BASE}/api/create-baseline`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folder_path: data.folder_path })
-        });
-        if (baseRes.ok) {
-          const baseData = await baseRes.json();
-          addConsoleLog(`Baseline created successfully! Monitored files: ${baseData.file_count}`, 'success');
-          addConsoleLog('Background monitoring will check every 20 minutes.', 'info');
-          fetchStatus();
-          fetchLogs();
-          fetchMonitoring();
-        } else {
-          const errData = await baseRes.json();
-          addConsoleLog(`Failed to create baseline: ${errData.detail}`, 'danger');
-        }
+        addConsoleLog(`Monitoring started for: ${data.folder_path}`, 'success');
+        addConsoleLog(`Baseline created automatically — ${data.file_count} files snapshotted.`, 'success');
+        addConsoleLog('Background checks run every 20 minutes. Use Check Now anytime.', 'info');
+        await fetchStatus();
+        fetchLogs();
+        fetchMonitoring();
+        fetchMonitoredFiles();
       } else if (data.info) {
         addConsoleLog(data.info, 'warning');
       } else if (data.error) {
         addConsoleLog(`Native folder picker failed: ${data.error}`, 'warning');
+      } else if (!res.ok) {
+        addConsoleLog(`Failed to start monitoring: ${data.detail || 'Unknown error'}`, 'danger');
       }
     } catch (err) {
       console.error(err);
@@ -220,63 +258,49 @@ function App() {
     }
   };
 
-  const handleCreateBaseline = async () => {
-    if (!folderPathInput) {
-      alert("Please select or enter a folder path.");
-      return;
-    }
+  const handleCheckNow = async () => {
     setLoading(true);
-    addConsoleLog(`Creating baseline for: ${folderPathInput}...`, 'info');
+    addConsoleLog('Running immediate integrity check…', 'info');
     try {
-      const res = await fetch(`${API_BASE}/api/create-baseline`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_path: folderPathInput })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        addConsoleLog(`Successfully created baseline. Monitored files: ${data.file_count}`, 'success');
-        fetchStatus();
+      const res = await fetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCheckResult(data);
+        const totalChanges = data.modified_files.length + data.deleted_files.length + data.new_files.length;
+        if (totalChanges === 0) {
+          addConsoleLog('Check complete — all files match the baseline.', 'success');
+        } else {
+          addConsoleLog(`Check complete — ${data.modified_files.length} modified, ${data.deleted_files.length} deleted, ${data.new_files.length} new.`, 'danger');
+        }
+        fetchReports();
         fetchLogs();
+        fetchMonitoring();
       } else {
-        const errData = await res.json();
-        addConsoleLog(`Error: ${errData.detail}`, 'danger');
+        addConsoleLog(`Check failed: ${data.detail || data.message || 'Unknown error'}`, 'danger');
       }
     } catch (err) {
-      addConsoleLog(`Error creating baseline: ${err.message}`, 'danger');
+      addConsoleLog(`Error running check: ${err.message}`, 'danger');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCheckIntegrity = async () => {
-    setLoading(true);
-    addConsoleLog("Running integrity check...", 'info');
+  const handleDeleteReport = async (filename) => {
+    if (!window.confirm(`Delete report "${filename}"?`)) return;
+
     try {
-      const res = await fetch(`${API_BASE}/api/check-integrity`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
       if (res.ok) {
-        const data = await res.json();
-        setCheckResult(data);
-        if (data.success) {
-          const totalChanges = data.modified_files.length + data.deleted_files.length + data.new_files.length;
-          if (totalChanges === 0) {
-            addConsoleLog("Integrity check completed: No changes detected. System healthy.", 'success');
-          } else {
-            addConsoleLog(`Integrity violation! Modified: ${data.modified_files.length}, Deleted: ${data.deleted_files.length}, New: ${data.new_files.length}`, 'danger');
-          }
-          fetchReports();
-          fetchLogs();
-        } else {
-          addConsoleLog(`Check failed: ${data.message}`, 'danger');
-        }
+        addConsoleLog(`Deleted report: ${filename}`, 'warning');
+        fetchReports();
       } else {
-        const errData = await res.json();
-        addConsoleLog(`Error: ${errData.detail}`, 'danger');
+        const data = await res.json();
+        addConsoleLog(`Could not delete report: ${data.detail || 'Unknown error'}`, 'danger');
       }
     } catch (err) {
-      addConsoleLog(`Error checking integrity: ${err.message}`, 'danger');
-    } finally {
-      setLoading(false);
+      addConsoleLog(`Error deleting report: ${err.message}`, 'danger');
     }
   };
 
@@ -292,21 +316,13 @@ function App() {
       {/* Toast notifications */}
       <div className="toast-container">
         {toasts.map(alert => (
-          <div key={alert.id} className="toast toast-danger">
-            <div className="toast-icon">
-              <AlertTriangle size={20} />
-            </div>
-            <div className="toast-body">
-              <strong>Integrity change detected</strong>
-              <p>
-                {alert.modified_count} modified, {alert.deleted_count} deleted, {alert.new_count} new
-              </p>
-              <span className="toast-time">{alert.timestamp}</span>
-            </div>
-            <button className="toast-dismiss" onClick={() => dismissToast(alert.id)} aria-label="Dismiss">
-              <X size={16} />
-            </button>
-          </div>
+          <ToastNotification
+            key={alert.id}
+            alert={alert}
+            appIcon={APP_ICON}
+            pageName={PAGE_LABELS[activeTab] || 'Overview'}
+            onDismiss={dismissToast}
+          />
         ))}
       </div>
       {/* Sidebar */}
@@ -323,6 +339,13 @@ function App() {
           >
             <Activity size={18} />
             Overview
+          </button>
+          <button 
+            className={`nav-item ${activeTab === 'files' ? 'active' : ''}`}
+            onClick={() => setActiveTab('files')}
+          >
+            <Files size={18} />
+            Monitored Files
           </button>
           <button 
             className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
@@ -352,11 +375,13 @@ function App() {
           <div>
             <h1 className="header-title">
               {activeTab === 'dashboard' && "File Integrity Dashboard"}
+              {activeTab === 'files' && "Monitored Files"}
               {activeTab === 'logs' && "Audit Log Registry"}
               {activeTab === 'reports' && "Generated Report Archive"}
             </h1>
             <p className="header-subtitle">
               {activeTab === 'dashboard' && "Real-time monitoring stats, baseline builder, and discrepancy viewer."}
+              {activeTab === 'files' && "Browse every file included in your monitoring baseline and preview text content."}
               {activeTab === 'logs' && "Historical log registry capturing monitoring activities and integrity events."}
               {activeTab === 'reports' && "Download and inspect detailed PDF integrity reports generated by FIM."}
             </p>
@@ -375,6 +400,15 @@ function App() {
                   <span>Last: {formatCheckTime(monitoring.last_check_at)}</span>
                   <span>Next: {monitoring.active ? formatCheckTime(monitoring.next_check_at) : '—'}</span>
                 </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleCheckNow}
+                  disabled={loading || monitoring.is_checking}
+                  style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem' }}
+                >
+                  <Zap size={14} />
+                  {monitoring.is_checking ? 'Checking…' : 'Check Now'}
+                </button>
                 <button
                   className="btn btn-secondary"
                   onClick={handleToggleMonitoring}
@@ -399,13 +433,13 @@ function App() {
           <>
             {/* Stats Grid */}
             <section className="stats-grid">
-              <div className="glass-panel stat-card">
+              <div className="glass-panel stat-card stat-card-clickable" onClick={() => setActiveTab('files')} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setActiveTab('files')}>
                 <div className="stat-icon-wrapper" style={{ backgroundColor: 'var(--accent-primary-glow)', color: 'var(--accent-primary)' }}>
                   <HardDrive size={24} />
                 </div>
                 <div className="stat-info">
                   <span className="stat-value">{status.file_count}</span>
-                  <span className="stat-label">Files Monitored</span>
+                  <span className="stat-label">Files Monitored · View</span>
                 </div>
               </div>
 
@@ -458,7 +492,7 @@ function App() {
                       {loading ? 'Opening folder picker…' : 'Browse & Start Monitoring'}
                     </button>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center' }}>
-                      Click to open your file browser, select any folder, and monitoring starts automatically.
+                      Pick a folder — monitoring and baseline snapshot start automatically.
                     </p>
                   </div>
                 ) : (
@@ -471,12 +505,19 @@ function App() {
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                       <button 
                         className="btn btn-primary" 
-                        onClick={handleCheckIntegrity} 
-                        disabled={loading}
+                        onClick={handleCheckNow} 
+                        disabled={loading || monitoring.is_checking}
                         style={{ flex: 1 }}
                       >
-                        <Activity size={18} />
-                        {loading ? 'Scanning…' : 'Check File Integrity'}
+                        <Zap size={18} />
+                        {loading || monitoring.is_checking ? 'Checking…' : 'Check Now'}
+                      </button>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={() => setActiveTab('files')}
+                      >
+                        <Files size={16} />
+                        View Files
                       </button>
                       <button 
                         className="btn btn-secondary" 
@@ -535,8 +576,8 @@ function App() {
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && "Action Required: File Changes Detected"}
                   </h3>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-                    {!status.has_baseline && "Click 'Create Baseline' to take a security snapshot of your selected folder."}
-                    {status.has_baseline && !checkResult && "The security snapshot is active. Background checks run every 20 minutes, or click 'Check File Integrity' for an immediate scan."}
+                    {!status.has_baseline && "Pick a folder above — a baseline snapshot is created automatically."}
+                    {status.has_baseline && !checkResult && "Monitoring is active. Checks run every 20 minutes, or click Check Now for an immediate scan."}
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length === 0) && "All monitored files are intact. No unauthorized changes or modifications were found."}
                     {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && `We found ${checkResult.modified_files.length} modified, ${checkResult.deleted_files.length} deleted, and ${checkResult.new_files.length} new files. See details below.`}
                   </p>
@@ -613,77 +654,15 @@ function App() {
                 {checkResult.modified_files.length > 0 && (
                   <div style={{ marginBottom: '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-warning)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      ✏️ Files That Were Changed ({checkResult.modified_files.length})
+                      Changed Files ({checkResult.modified_files.length})
                     </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      {checkResult.modified_files.map((file, fIndex) => {
-                        const fileName = file.split('/').pop() || file.split('\\').pop();
-                        const diffs = checkResult.text_differences[file];
-                        const removedLines = diffs ? diffs.filter(l => l.startsWith('-')) : [];
-                        const addedLines = diffs ? diffs.filter(l => l.startsWith('+')) : [];
-                        return (
-                          <div key={fIndex} className="glass-panel" style={{ padding: '1.5rem', borderLeft: '4px solid var(--color-warning)' }}>
-                            {/* File name header */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-                              <span style={{ fontSize: '1.5rem' }}>📄</span>
-                              <div>
-                                <p style={{ fontWeight: 700, fontSize: '1rem' }}>{fileName}</p>
-                                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{file}</p>
-                              </div>
-                              <span style={{ marginLeft: 'auto', background: 'var(--color-warning-bg)', color: 'var(--color-warning)', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700 }}>MODIFIED</span>
-                            </div>
-
-                            {diffs ? (
-                              <>
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                                  This file was edited. Here is what was removed and what was added:
-                                </p>
-                                {/* Side-by-side Before/After */}
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                  {/* Before */}
-                                  <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
-                                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--color-danger)', display: 'inline-block' }}></span>
-                                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-danger)' }}>BEFORE (Removed)</span>
-                                    </div>
-                                    <div style={{ background: 'var(--color-danger-bg)', borderRadius: '6px', padding: '0.75rem', fontSize: '0.875rem', fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
-                                      {removedLines.length > 0 ? removedLines.map((l, i) => (
-                                        <div key={i} style={{ color: 'var(--color-danger)' }}>{l.substring(1).trim() || <em style={{ opacity: 0.5 }}>(empty line)</em>}</div>
-                                      )) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nothing was removed</span>}
-                                    </div>
-                                  </div>
-                                  {/* After */}
-                                  <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
-                                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--color-success)', display: 'inline-block' }}></span>
-                                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-success)' }}>AFTER (Added)</span>
-                                    </div>
-                                    <div style={{ background: 'var(--color-success-bg)', borderRadius: '6px', padding: '0.75rem', fontSize: '0.875rem', fontFamily: 'var(--font-mono)', lineHeight: 1.7 }}>
-                                      {addedLines.length > 0 ? addedLines.map((l, i) => (
-                                        <div key={i} style={{ color: 'var(--color-success)' }}>{l.substring(1).trim() || <em style={{ opacity: 0.5 }}>(empty line)</em>}</div>
-                                      )) : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Nothing was added</span>}
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* Raw diff collapsible */}
-                                <details style={{ marginTop: '1rem' }}>
-                                  <summary style={{ cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-gold)', fontWeight: 600 }}>Show raw technical diff</summary>
-                                  <div style={{ marginTop: '0.5rem', background: '#141210', borderRadius: '6px', padding: '0.75rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', lineHeight: 1.6 }}>
-                                    {diffs.map((l, i) => (
-                                      <div key={i} style={{ color: l.startsWith('+') ? '#86efac' : l.startsWith('-') ? '#fda4af' : '#9ca3af' }}>{l}</div>
-                                    ))}
-                                  </div>
-                                </details>
-                              </>
-                            ) : (
-                              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                                This file's content was changed but detailed text comparison is not available for this file type. The file's digital fingerprint no longer matches the original.
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                      Tap a file to see what it looked like before and what it looks like now.
+                    </p>
+                    <FileChangeViewer
+                      modifiedFiles={checkResult.modified_files}
+                      textDifferences={checkResult.text_differences}
+                    />
                   </div>
                 )}
 
@@ -741,6 +720,14 @@ function App() {
           </>
         )}
 
+        {activeTab === 'files' && (
+          <MonitoredFilesPanel
+            files={monitoredFiles}
+            folderPath={status.folder_path}
+            loading={filesLoading}
+          />
+        )}
+
         {activeTab === 'logs' && (
           <section className="glass-panel" style={{ padding: '1.5rem', minHeight: '500px' }}>
             <h3 className="card-title"><Terminal size={18} /> System Audit Trail (fim_log.txt)</h3>
@@ -762,6 +749,9 @@ function App() {
         {activeTab === 'reports' && (
           <section className="glass-panel" style={{ padding: '1.5rem' }}>
             <h3 className="card-title"><FileText size={18} /> Available PDF Reports</h3>
+            <p className="text-secondary" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
+              Only the 5 most recent reports are kept. Older reports are removed automatically.
+            </p>
             {reports.length === 0 ? (
               <p className="text-muted">No integrity check reports found.</p>
             ) : (
@@ -781,15 +771,25 @@ function App() {
                       <td>{report.created_at}</td>
                       <td>{(report.size_bytes / 1024).toFixed(2)} KB</td>
                       <td>
-                        <a 
-                          href={`${API_BASE}/api/reports/${report.filename}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="btn btn-secondary" 
-                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-                        >
-                          <Download size={14} /> Download PDF
-                        </a>
+                        <div className="report-actions">
+                          <a 
+                            href={`${API_BASE}/api/reports/${report.filename}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary" 
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                          >
+                            <Download size={14} /> Download
+                          </a>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            onClick={() => handleDeleteReport(report.filename)}
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                          >
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
