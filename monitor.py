@@ -5,16 +5,18 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from config import ENABLE_REALTIME_MONITORING, MONITORING_INTERVAL_SECONDS
-from baseline import load_baseline
+from baseline_store import get_monitors
 from integrity import run_integrity_check
+from settings_manager import load_settings
 
 logger = logging.getLogger("FIM_Monitor")
 
 
 class MonitorService:
     def __init__(self):
-        self.enabled = ENABLE_REALTIME_MONITORING
-        self.interval = MONITORING_INTERVAL_SECONDS
+        settings = load_settings()
+        self.enabled = settings.get("monitoring_enabled", ENABLE_REALTIME_MONITORING)
+        self.interval = settings.get("monitoring_interval_seconds", MONITORING_INTERVAL_SECONDS)
         self._task: Optional[asyncio.Task] = None
         self.last_check_at: Optional[str] = None
         self.next_check_at: Optional[str] = None
@@ -99,7 +101,7 @@ class MonitorService:
     async def run_check(self, generate_report: bool = False) -> Optional[dict]:
         if self.is_checking:
             return self.last_result
-        if not load_baseline():
+        if not get_monitors():
             return None
 
         self.is_checking = True
@@ -131,7 +133,7 @@ class MonitorService:
 
         while True:
             try:
-                if self.enabled and load_baseline():
+                if self.enabled and get_monitors():
                     await self.run_check(generate_report=False)
                 else:
                     self._set_next_check()
@@ -159,16 +161,19 @@ class MonitorService:
         self._task = None
 
     def get_status(self) -> dict:
-        baseline = load_baseline()
+        baseline = get_monitors()
+        settings = load_settings()
+        self.interval = settings.get("monitoring_interval_seconds", self.interval)
+        self.enabled = settings.get("monitoring_enabled", self.enabled)
         return {
             "enabled": self.enabled,
-            "active": baseline is not None and self.enabled,
+            "active": len(baseline) > 0 and self.enabled,
             "interval_seconds": self.interval,
             "interval_minutes": self.interval // 60,
             "is_checking": self.is_checking,
             "last_check_at": self.last_check_at,
             "next_check_at": self.next_check_at,
-            "has_baseline": baseline is not None,
+            "has_baseline": len(baseline) > 0,
             "pending_alert_count": len(self._pending_alerts),
             "last_result": self.last_result,
         }
@@ -200,6 +205,13 @@ class MonitorService:
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
+        from settings_manager import save_settings
+        save_settings({"monitoring_enabled": enabled})
+
+    def reload_settings(self) -> None:
+        settings = load_settings()
+        self.interval = settings.get("monitoring_interval_seconds", MONITORING_INTERVAL_SECONDS)
+        self.enabled = settings.get("monitoring_enabled", ENABLE_REALTIME_MONITORING)
 
 
 monitor_service = MonitorService()

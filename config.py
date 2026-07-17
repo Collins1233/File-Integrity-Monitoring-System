@@ -19,7 +19,7 @@ from config import SUPPORTED_FILE_TYPES
 # =========================================================
 
 APP_NAME = "File Integrity Monitoring System"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
 WINDOW_TITLE = "File Integrity Monitoring System"
 
@@ -29,6 +29,7 @@ WINDOW_TITLE = "File Integrity Monitoring System"
 
 BASELINE_FILE = "baseline.json"
 BASELINE_FOLDER = "baseline_files"
+SETTINGS_FILE = "settings.json"
 
 # =========================================================
 # REPORT SETTINGS
@@ -52,6 +53,9 @@ HASH_ALGORITHM = "sha256"
 
 # Read files in 4 KB chunks while hashing
 BUFFER_SIZE = 4096
+
+# Files larger than this skip full text snapshots when hash-only mode is enabled
+HASH_ONLY_SIZE_BYTES = 1048576
 
 # =========================================================
 # SUPPORTED FILE TYPES

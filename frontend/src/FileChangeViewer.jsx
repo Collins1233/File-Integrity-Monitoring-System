@@ -83,40 +83,39 @@ function FileChangeCard({ filePath, diffData }) {
 
       {expanded && (
         <div className="file-change-body">
-          {diff ? (
+          {!diff ? (
+            <p className="file-change-unavailable">
+              This file was changed, but a readable preview is not available for this file type.
+            </p>
+          ) : (
             <>
               <p className="file-change-intro">
                 Compare the original snapshot taken when monitoring started with the file as it exists now.
               </p>
-              <div className="file-compare-grid">
-                <div className="file-compare-panel">
-                  <div className="file-compare-panel-header before">
-                    <span className="file-compare-dot" />
-                    Original version
-                  </div>
-                  <LineBlock
-                    lines={diff.before}
-                    changedLines={diff.changed_before_lines}
-                    variant="before"
-                  />
+              {diff.preview_type === 'office' && diff.office_diff ? (
+                <div className="monitored-file-preview">
+                  <div className="monitored-file-preview-header">Office document changes</div>
+                  <pre>{diff.office_diff.join('\n')}</pre>
                 </div>
-                <div className="file-compare-panel">
-                  <div className="file-compare-panel-header after">
-                    <span className="file-compare-dot" />
-                    Current version
+              ) : (
+                <div className="file-compare-grid">
+                  <div className="file-compare-panel">
+                    <div className="file-compare-panel-header before">
+                      <span className="file-compare-dot" />
+                      Original version
+                    </div>
+                    <LineBlock lines={diff.before} changedLines={diff.changed_before_lines} variant="before" />
                   </div>
-                  <LineBlock
-                    lines={diff.after}
-                    changedLines={diff.changed_after_lines}
-                    variant="after"
-                  />
+                  <div className="file-compare-panel">
+                    <div className="file-compare-panel-header after">
+                      <span className="file-compare-dot" />
+                      Current version
+                    </div>
+                    <LineBlock lines={diff.after} changedLines={diff.changed_after_lines} variant="after" />
+                  </div>
                 </div>
-              </div>
+              )}
             </>
-          ) : (
-            <p className="file-change-unavailable">
-              This file was changed, but a readable text preview is not available for this file type.
-            </p>
           )}
         </div>
       )}

@@ -19,12 +19,17 @@ import {
   Radio,
   Files,
   Zap,
-  Trash2
+  Trash2,
+  RotateCcw,
+  Eye
 } from 'lucide-react';
 
 import FileChangeViewer from './FileChangeViewer';
 import ToastNotification from './ToastNotification';
 import MonitoredFilesPanel from './MonitoredFilesPanel';
+import VersionGate from './VersionGate';
+import OnboardingWizard from './OnboardingWizard';
+import SettingsPanel from './SettingsPanel';
 import {
   formatAlertTitle,
   getAffectedFiles,
@@ -38,6 +43,7 @@ const PAGE_LABELS = {
   files: 'Monitored Files',
   logs: 'System Logs',
   reports: 'Reports Archive',
+  settings: 'Settings',
 };
 
 function App() {
@@ -67,6 +73,13 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [monitoredFiles, setMonitoredFiles] = useState([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [monitors, setMonitors] = useState([]);
+  const [activeMonitorId, setActiveMonitorId] = useState(null);
+  const [serverOnline, setServerOnline] = useState(true);
+  const [scanProgress, setScanProgress] = useState({ active: false, percent: 0, current_file: '' });
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fim_dark_mode') === 'true');
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('fim_onboarding_done'));
+  const [previewReport, setPreviewReport] = useState(null);
   const seenAlertIds = useRef(new Set());
 
   const addConsoleLog = useCallback((message, type = 'info') => {
@@ -166,13 +179,16 @@ function App() {
   const fetchStatus = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/status`);
+      if (!res.ok) throw new Error('offline');
       const data = await res.json();
+      setServerOnline(true);
       setStatus(data);
-      if (data.folder_path) {
-        setFolderPathInput(data.folder_path);
-      }
+      setMonitors(data.monitors || []);
+      setActiveMonitorId(data.active_monitor_id || null);
+      if (data.folder_path) setFolderPathInput(data.folder_path);
     } catch (err) {
-      console.error("Error fetching status:", err);
+      setServerOnline(false);
+      console.error('Error fetching status:', err);
     }
   };
 
@@ -196,10 +212,11 @@ function App() {
     }
   };
 
-  const fetchMonitoredFiles = async () => {
+  const fetchMonitoredFiles = async (monitorId = activeMonitorId) => {
     setFilesLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/files`);
+      const query = monitorId ? `?monitor_id=${encodeURIComponent(monitorId)}` : '';
+      const res = await fetch(`${API_BASE}/api/files${query}`);
       const data = await res.json();
       setMonitoredFiles(data.files || []);
     } catch (err) {
@@ -209,6 +226,20 @@ function App() {
     }
   };
 
+  const fetchScanProgress = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/scan/progress`);
+      if (res.ok) setScanProgress(await res.json());
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    localStorage.setItem('fim_dark_mode', darkMode ? 'true' : 'false');
+  }, [darkMode]);
+
   useEffect(() => {
     fetchStatus();
     fetchReports();
@@ -217,15 +248,19 @@ function App() {
     fetchMonitoredFiles();
     requestNotificationPermission();
 
-    const interval = setInterval(fetchMonitoring, 30000);
-    return () => clearInterval(interval);
+    const monitoringInterval = setInterval(fetchMonitoring, 30000);
+    const healthInterval = setInterval(fetchStatus, 10000);
+    const progressInterval = setInterval(fetchScanProgress, 1500);
+    return () => {
+      clearInterval(monitoringInterval);
+      clearInterval(healthInterval);
+      clearInterval(progressInterval);
+    };
   }, [fetchMonitoring]);
 
   useEffect(() => {
-    if (activeTab === 'files' && status.has_baseline) {
-      fetchMonitoredFiles();
-    }
-  }, [activeTab, status.has_baseline]);
+    if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
+  }, [activeTab, status.has_baseline, activeMonitorId]);
 
   // Actions
   const handleSelectFolder = async () => {
@@ -285,6 +320,66 @@ function App() {
     }
   };
 
+  const handleAcceptBaseline = async () => {
+    if (!window.confirm('Accept current files as the new baseline? Future checks will compare against this snapshot.')) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/baseline/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitor_id: activeMonitorId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addConsoleLog(`Baseline updated — ${data.file_count} files snapshotted.`, 'success');
+        setCheckResult(null);
+        fetchStatus();
+        fetchMonitoredFiles();
+        fetchLogs();
+      } else {
+        addConsoleLog(`Could not update baseline: ${data.detail}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error updating baseline: ${err.message}`, 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestoreFile = async (path) => {
+    if (!window.confirm(`Restore this file from the baseline backup?\n\n${path}`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/files/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, monitor_id: activeMonitorId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addConsoleLog(`Restored file from backup: ${path}`, 'success');
+      } else {
+        addConsoleLog(`Restore failed: ${data.detail}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Restore error: ${err.message}`, 'danger');
+    }
+  };
+
+  const handleSelectMonitor = async (monitorId) => {
+    try {
+      await fetch(`${API_BASE}/api/monitors/active`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitor_id: monitorId }),
+      });
+      setActiveMonitorId(monitorId);
+      fetchStatus();
+      fetchMonitoredFiles(monitorId);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDeleteReport = async (filename) => {
     if (!window.confirm(`Delete report "${filename}"?`)) return;
 
@@ -313,6 +408,35 @@ function App() {
 
   return (
     <div className="app-container">
+      <VersionGate />
+      <OnboardingWizard
+        open={showOnboarding}
+        onClose={() => {
+          localStorage.setItem('fim_onboarding_done', 'true');
+          setShowOnboarding(false);
+        }}
+        onStart={() => {
+          localStorage.setItem('fim_onboarding_done', 'true');
+          setShowOnboarding(false);
+          handleSelectFolder();
+        }}
+      />
+
+      {!serverOnline && (
+        <div className="server-offline-banner">
+          Cannot reach the monitoring server. Start it with <code>python3 server.py</code> — reconnecting…
+        </div>
+      )}
+
+      {scanProgress.active && (
+        <div className="scan-progress-banner">
+          <div className="scan-progress-text">
+            {scanProgress.operation || 'Scanning'} — {scanProgress.percent}% ({scanProgress.current}/{scanProgress.total})
+          </div>
+          <div className="scan-progress-bar"><span style={{ width: `${scanProgress.percent}%` }} /></div>
+          {scanProgress.current_file && <div className="scan-progress-file">{scanProgress.current_file}</div>}
+        </div>
+      )}
       {/* Toast notifications */}
       <div className="toast-container">
         {toasts.map(alert => (
@@ -361,11 +485,18 @@ function App() {
             <FileText size={18} />
             Reports Archive
           </button>
+          <button 
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            <Settings size={18} />
+            Settings
+          </button>
         </nav>
 
         <div style={{ marginTop: 'auto', padding: '1rem 0', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <Settings size={16} className="text-muted" />
-          <span className="text-muted" style={{ fontSize: '0.8rem' }}>FIM System v1.0.0</span>
+          <span className="text-muted" style={{ fontSize: '0.8rem' }}>FIM System v2.0.0</span>
         </div>
       </aside>
 
@@ -378,12 +509,14 @@ function App() {
               {activeTab === 'files' && "Monitored Files"}
               {activeTab === 'logs' && "Audit Log Registry"}
               {activeTab === 'reports' && "Generated Report Archive"}
+              {activeTab === 'settings' && "Settings"}
             </h1>
             <p className="header-subtitle">
               {activeTab === 'dashboard' && "Real-time monitoring stats, baseline builder, and discrepancy viewer."}
               {activeTab === 'files' && "Browse every file included in your monitoring baseline and preview text content."}
               {activeTab === 'logs' && "Historical log registry capturing monitoring activities and integrity events."}
               {activeTab === 'reports' && "Download and inspect detailed PDF integrity reports generated by FIM."}
+              {activeTab === 'settings' && "Configure monitoring, exclusions, and appearance."}
             </p>
 
             {status.has_baseline && activeTab === 'dashboard' && (
@@ -639,6 +772,14 @@ function App() {
                   }
                 </h2>
 
+                {checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && (
+                  <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button type="button" className="btn btn-primary" onClick={handleAcceptBaseline} disabled={loading}>
+                      <RotateCcw size={16} /> Accept changes & update baseline
+                    </button>
+                  </div>
+                )}
+
                 {/* All Clear */}
                 {checkResult.modified_files.length === 0 && checkResult.deleted_files.length === 0 && checkResult.new_files.length === 0 && (
                   <div className="glass-panel" style={{ padding: '2rem', display: 'flex', alignItems: 'center', gap: '1.25rem', borderLeft: '4px solid var(--color-success)' }}>
@@ -724,13 +865,23 @@ function App() {
           <MonitoredFilesPanel
             files={monitoredFiles}
             folderPath={status.folder_path}
+            monitors={monitors}
+            activeMonitorId={activeMonitorId}
+            onSelectMonitor={handleSelectMonitor}
             loading={filesLoading}
+            onRestore={handleRestoreFile}
           />
         )}
 
         {activeTab === 'logs' && (
           <section className="glass-panel" style={{ padding: '1.5rem', minHeight: '500px' }}>
-            <h3 className="card-title"><Terminal size={18} /> System Audit Trail (fim_log.txt)</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              <h3 className="card-title" style={{ margin: 0 }}><Terminal size={18} /> System Audit Trail (fim_log.txt)</h3>
+              <div className="report-actions">
+                <a href={`${API_BASE}/api/logs/export?format=csv`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export CSV</a>
+                <a href={`${API_BASE}/api/logs/export?format=json`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export JSON</a>
+              </div>
+            </div>
             <div className="terminal-body" style={{ height: '450px' }}>
               {systemLogs.length === 0 ? (
                 <span className="text-muted">No logs recorded yet.</span>
@@ -772,6 +923,14 @@ function App() {
                       <td>{(report.size_bytes / 1024).toFixed(2)} KB</td>
                       <td>
                         <div className="report-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => setPreviewReport(report.filename)}
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                          >
+                            <Eye size={14} /> Preview
+                          </button>
                           <a 
                             href={`${API_BASE}/api/reports/${report.filename}`} 
                             target="_blank" 
@@ -796,7 +955,27 @@ function App() {
                 </tbody>
               </table>
             )}
+            {previewReport && (
+              <div className="report-preview-panel">
+                <div className="report-preview-header">
+                  <strong>{previewReport}</strong>
+                  <button type="button" className="btn btn-secondary" onClick={() => setPreviewReport(null)}>Close preview</button>
+                </div>
+                <iframe title="Report preview" src={`${API_BASE}/api/reports/${previewReport}/preview`} />
+              </div>
+            )}
           </section>
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsPanel
+            darkMode={darkMode}
+            onToggleDarkMode={() => setDarkMode((value) => !value)}
+            onSaved={() => {
+              addConsoleLog('Settings saved.', 'success');
+              fetchMonitoring();
+            }}
+          />
         )}
       </main>
     </div>

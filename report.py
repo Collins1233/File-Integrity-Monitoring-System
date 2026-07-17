@@ -4,6 +4,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 from config import REPORT_FOLDER, MAX_REPORTS_RETAINED
+from settings_manager import load_settings
 
 
 def list_reports():
@@ -28,7 +29,9 @@ def list_reports():
     return files
 
 
-def prune_old_reports(keep=MAX_REPORTS_RETAINED):
+def prune_old_reports(keep=None):
+    if keep is None:
+        keep = load_settings().get("max_reports_retained", MAX_REPORTS_RETAINED)
     reports = list_reports()
     removed = []
 
