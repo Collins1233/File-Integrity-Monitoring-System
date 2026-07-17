@@ -120,8 +120,11 @@ WINDOW_HEIGHT = 650
 # FUTURE FEATURES
 # =========================================================
 
-ENABLE_NOTIFICATIONS = False
-ENABLE_REALTIME_MONITORING = False
+ENABLE_NOTIFICATIONS = True
+ENABLE_REALTIME_MONITORING = True
+
+# Background integrity check interval (seconds). 1200 = 20 minutes.
+MONITORING_INTERVAL_SECONDS = 1200
 ENABLE_SHAREPOINT_MONITORING = False
 ENABLE_EMAIL_ALERTS = False
 

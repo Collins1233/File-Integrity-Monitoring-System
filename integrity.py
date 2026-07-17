@@ -6,7 +6,7 @@ from textdiff import compare_text
 from report import generate_pdf_report
 
 
-def run_integrity_check():
+def run_integrity_check(generate_report=True):
     baseline = load_baseline()
 
     if baseline is None:
@@ -39,11 +39,14 @@ def run_integrity_check():
             modified_files.append(file_path)
 
             old_info = old_files[file_path]
-            current_info = current_files[file_path]
 
-            if old_info.get("is_text_file") and current_info.get("is_text_file"):
+            # If this is a text file and we have the original content snapshot, diff it
+            if old_info.get("is_text_file") and old_info.get("content_snapshot") is not None:
                 old_lines = old_info.get("content_snapshot", [])
-                new_lines = current_info.get("content_snapshot", [])
+
+                # Read current file content fresh from disk
+                from textdiff import read_text_file
+                new_lines = read_text_file(file_path)
 
                 differences = compare_text(old_lines, new_lines)
 
@@ -69,15 +72,18 @@ def run_integrity_check():
         f"New: {len(new_files)}"
     )
 
-    report_path = generate_pdf_report(
-        folder_path,
-        modified_files,
-        deleted_files,
-        new_files,
-        text_differences
-    )
-
-    save_log(f"[REPORT GENERATED] {report_path}")
+    report_path = None
+    if generate_report:
+        report_path = generate_pdf_report(
+            folder_path,
+            modified_files,
+            deleted_files,
+            new_files,
+            text_differences
+        )
+        save_log(f"[REPORT GENERATED] {report_path}")
+    else:
+        save_log("[AUTO CHECK] Background scan completed (no PDF generated).")
 
     return {
         "success": True,
@@ -86,7 +92,8 @@ def run_integrity_check():
         "deleted_files": deleted_files,
         "new_files": new_files,
         "text_differences": text_differences,
-        "report_path": report_path
+        "report_path": report_path,
+        "auto_check": not generate_report,
     }
 
 

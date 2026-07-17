@@ -25,14 +25,11 @@ def read_text_file(file_path):
         return []
 
 
-def compare_text(old_file, new_file):
+def compare_text(old_lines, new_lines):
     """
-    Compares two text files and returns the differences.
+    Compares two lists of text lines and returns the unified diff.
+    Accepts pre-read lists of strings (not file paths).
     """
-
-    old_lines = read_text_file(old_file)
-
-    new_lines = read_text_file(new_file)
 
     differences = list(
 
