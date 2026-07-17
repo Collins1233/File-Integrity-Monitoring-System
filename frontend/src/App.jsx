@@ -652,7 +652,7 @@ function App() {
 
       {!serverOnline && (
         <div className="server-offline-banner">
-          Cannot reach the monitoring server. Start it with <code>python3 server.py</code>. Reconnecting…
+          Cannot reach the monitoring server. From the project root run <code>npm run dev</code> (starts API + UI). Reconnecting…
         </div>
       )}
 

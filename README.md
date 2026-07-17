@@ -25,6 +25,8 @@ pip install -r backend/requirements.txt
 npm run install:all
 ```
 
+On **Windows**, use `pip` or `py -3 -m pip install -r backend/requirements.txt` if `python` is not on PATH.
+
 ### 2. Development (recommended)
 
 Starts the API on port **8000** and the UI on port **5173** with hot reload:
@@ -33,7 +35,9 @@ Starts the API on port **8000** and the UI on port **5173** with hot reload:
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**
+Open **http://localhost:5173**
+
+Works on **macOS, Linux, and Windows** — no need to run Python manually.
 
 ### 3. Production-style (single server)
 
