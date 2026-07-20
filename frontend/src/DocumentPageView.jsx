@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import mammoth from 'mammoth';
 import {
   ChevronLeft,
   ChevronRight,
@@ -257,10 +256,11 @@ function WordHtmlPage({ filePath, side, diff, pageIndex, compact }) {
     let cancelled = false;
     (async () => {
       try {
+        const mammoth = await import('mammoth');
         const res = await fetch(url);
         if (!res.ok) throw new Error('fetch failed');
         const buf = await res.arrayBuffer();
-        const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+        const result = await mammoth.default.convertToHtml({ arrayBuffer: buf });
         if (!cancelled) {
           setHtml(result.value);
           setFailed(false);
