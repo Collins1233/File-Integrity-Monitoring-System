@@ -34,7 +34,7 @@ from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
-from config import APP_VERSION, MAX_REPORTS_RETAINED, PROJECT_ROOT
+from config import APP_VERSION, MAX_REPORTS_RETAINED, PROJECT_ROOT, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
 from textdiff import read_text_file
 from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
 
@@ -446,12 +446,46 @@ def api_get_files(monitor_id: Optional[str] = None):
     }
 
 
+def _file_under_monitor(monitor, file_path: str) -> bool:
+    file_path = os.path.normpath(file_path)
+    monitor_type = monitor.get("monitor_type", "folder")
+    if monitor_type == "files":
+        watch_paths = monitor.get("watch_paths") or list(monitor.get("files", {}).keys())
+        return file_path in {os.path.normpath(p) for p in watch_paths}
+    folder_path = monitor.get("folder_path", "")
+    if not folder_path:
+        return False
+    folder_path = os.path.normpath(folder_path)
+    try:
+        return os.path.commonpath([file_path, folder_path]) == folder_path
+    except ValueError:
+        return False
+
+
+def _resolve_file_info(monitor, file_path: str) -> dict | None:
+    info = monitor.get("files", {}).get(file_path)
+    if info:
+        return info
+    if not os.path.isfile(file_path) or not _file_under_monitor(monitor, file_path):
+        return None
+    extension = os.path.splitext(file_path)[1].lower()
+    return {
+        "extension": extension,
+        "file_type": SUPPORTED_FILE_TYPES.get(extension, "File"),
+        "is_text_file": extension in TEXT_EXTENSIONS,
+        "baseline_copy": None,
+        "hash_only": False,
+        "size": os.path.getsize(file_path),
+        "last_modified": "",
+    }
+
+
 @app.get("/api/files/preview")
 def api_preview_file(path: str, monitor_id: Optional[str] = None, version: str = Query("baseline")):
     monitor = get_active_monitor() if not monitor_id else next((m for m in get_monitors() if m["id"] == monitor_id), None)
     if not monitor:
         raise HTTPException(status_code=404, detail="No baseline found.")
-    info = monitor.get("files", {}).get(path)
+    info = _resolve_file_info(monitor, path)
     if not info:
         raise HTTPException(status_code=404, detail="File not found in monitored baseline.")
 
@@ -471,10 +505,8 @@ def api_preview_file(path: str, monitor_id: Optional[str] = None, version: str =
                 preview = "".join(read_text_file(path))
                 previewable = True
             else:
-                content_path = path if os.path.isfile(path) else None
-                if content_path:
-                    preview = extract_preview_text(content_path, extension)
-                    previewable = preview is not None
+                preview = extract_preview_text(path, extension)
+                previewable = preview is not None
     else:
         if info.get("is_text_file") and info.get("content_snapshot") is not None and not info.get("hash_only"):
             preview = "".join(info["content_snapshot"])
@@ -500,11 +532,16 @@ def api_preview_file(path: str, monitor_id: Optional[str] = None, version: str =
 
 
 @app.get("/api/files/content")
-def api_file_content(path: str, monitor_id: Optional[str] = None, version: str = Query("current")):
+def api_file_content(
+    path: str,
+    monitor_id: Optional[str] = None,
+    version: str = Query("current"),
+    inline: bool = Query(False),
+):
     monitor = get_active_monitor() if not monitor_id else next((m for m in get_monitors() if m["id"] == monitor_id), None)
     if not monitor:
         raise HTTPException(status_code=404, detail="No baseline found.")
-    info = monitor.get("files", {}).get(path)
+    info = _resolve_file_info(monitor, path)
     if not info:
         raise HTTPException(status_code=404, detail="File not found in monitored baseline.")
 
@@ -512,7 +549,13 @@ def api_file_content(path: str, monitor_id: Optional[str] = None, version: str =
     if not content_path or not os.path.isfile(content_path):
         raise HTTPException(status_code=404, detail="File content not available.")
 
-    return FileResponse(content_path, media_type=guess_media_type(content_path), filename=os.path.basename(path))
+    media_type = guess_media_type(content_path)
+    headers = {}
+    filename = os.path.basename(path)
+    if inline:
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+        return FileResponse(content_path, media_type=media_type, headers=headers)
+    return FileResponse(content_path, media_type=media_type, filename=filename)
 
 
 @app.get("/api/monitoring/status")

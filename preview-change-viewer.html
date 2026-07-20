@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FIM — Document Page View (preview for approval)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Calibri:wght@400;700&family=Lora:ital,wght@0,400..700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef3f9;
+      --card: #fff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #cbd5e1;
+      --blue: #2563eb;
+      --red: #e11d48;
+      --green: #0891b2;
+      --red-bg: #ffe4e6;
+      --green-bg: #cffafe;
+      --paper-shadow: 0 12px 40px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+      --sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --doc: Calibri, 'Segoe UI', Arial, sans-serif;
+      --serif: Lora, Georgia, serif;
+      --mono: Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.5;
+      padding: 1.75rem 1rem 3rem;
+    }
+
+    .wrap { max-width: 1200px; margin: 0 auto; }
+
+    .hero { margin-bottom: 1.5rem; }
+    .tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin-bottom: 0.45rem;
+    }
+    h1 {
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.35rem;
+    }
+    .hero p { color: var(--muted); max-width: 46rem; }
+
+    .approval-banner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.15rem;
+      margin-bottom: 1.25rem;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #eff6ff, #ecfeff);
+      border: 1px solid rgba(37, 99, 235, 0.2);
+    }
+    .approval-banner strong { font-size: 0.95rem; }
+    .approval-banner span { color: var(--muted); font-size: 0.88rem; }
+
+    .mode-demo {
+      display: flex;
+      gap: 0.35rem;
+      padding: 0.25rem;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+    .mode-btn {
+      border: none;
+      background: transparent;
+      padding: 0.45rem 0.9rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 650;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .mode-btn.active {
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+    }
+
+    .toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-bottom: 1.25rem;
+    }
+    .toc a {
+      text-decoration: none;
+      color: var(--muted);
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.38rem 0.8rem;
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+    .toc a:hover { border-color: var(--blue); color: var(--blue); }
+
+    .guide {
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--border);
+      margin-bottom: 1rem;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .guide strong { color: var(--text); }
+    .guide-keys { display: flex; flex-wrap: wrap; gap: 0.65rem 1rem; margin-top: 0.5rem; }
+    .key { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; }
+    .swatch {
+      width: 0.8rem; height: 0.8rem; border-radius: 3px;
+    }
+    .swatch.old { background: #fda4af; box-shadow: inset 0 0 0 1px var(--red); }
+    .swatch.new { background: #a5f3fc; box-shadow: inset 0 0 0 1px var(--green); }
+
+    .section-title {
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #d97706;
+      margin: 2rem 0 0.75rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1rem 1.15rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-title { font-weight: 750; font-size: 1.02rem; }
+    .card-sub { font-size: 0.86rem; color: var(--muted); margin-top: 0.15rem; }
+    .badges { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 750;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge.type { background: #f8fafc; border: 1px solid var(--border); color: var(--muted); }
+    .badge.changed { background: #fff7ed; color: #d97706; }
+
+    .card-body { padding: 1rem 1.15rem 1.25rem; }
+
+    .view-tabs {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 1rem;
+      padding: 0.25rem;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      width: fit-content;
+    }
+    .view-tab {
+      padding: 0.48rem 0.95rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 650;
+      color: var(--muted);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    .view-tab.active {
+      background: #fff;
+      color: var(--text);
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+    }
+
+    /* Side-by-side document pages */
+    .doc-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 900px) { .doc-compare { grid-template-columns: 1fr; } }
+
+    .doc-col-label {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.78rem;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.55rem;
+    }
+    .doc-col-label.before { color: #9f1239; }
+    .doc-col-label.after { color: #155e75; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    .doc-page {
+      background: #fff;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      box-shadow: var(--paper-shadow);
+      overflow: hidden;
+      min-height: 320px;
+    }
+
+    .doc-page-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.45rem 0.75rem;
+      background: #f1f5f9;
+      border-bottom: 1px solid #e2e8f0;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .doc-page-toolbar .page-num { font-weight: 700; color: var(--text); }
+
+    .doc-page-body {
+      padding: 2.25rem 2rem 2.5rem;
+      min-height: 280px;
+    }
+
+    /* Word-like document */
+    .word-page .doc-page-body {
+      font-family: var(--doc);
+      font-size: 11pt;
+      line-height: 1.35;
+      color: #1e293b;
+    }
+    .word-page h1 {
+      font-size: 16pt;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+      font-family: var(--doc);
+    }
+    .word-page .subtitle {
+      font-size: 10pt;
+      color: #64748b;
+      margin-bottom: 1.25rem;
+    }
+    .word-page p { margin-bottom: 0.75rem; }
+    .word-page table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 10pt;
+    }
+    .word-page th, .word-page td {
+      border: 1px solid #cbd5e1;
+      padding: 0.35rem 0.5rem;
+      text-align: left;
+    }
+    .word-page th { background: #f8fafc; }
+
+    /* PDF-like page */
+    .pdf-page .doc-page-body {
+      font-family: var(--serif);
+      font-size: 11pt;
+      line-height: 1.5;
+    }
+    .pdf-page .pdf-header {
+      text-align: center;
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .pdf-page .pdf-header h2 {
+      font-size: 14pt;
+      font-family: var(--serif);
+    }
+    .pdf-page .pdf-meta {
+      font-size: 9pt;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* PowerPoint slide */
+    .slide-page .doc-page-body {
+      aspect-ratio: 16/10;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      background: linear-gradient(180deg, #f8fafc 0%, #fff 40%);
+      padding: 2rem;
+    }
+    .slide-page h2 {
+      font-size: 1.65rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      font-family: var(--sans);
+    }
+    .slide-page p {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 85%;
+    }
+    .slide-footer {
+      position: absolute;
+      bottom: 0.75rem;
+      right: 1rem;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .slide-page { position: relative; }
+
+    /* Excel grid */
+    .sheet-page .doc-page-body { padding: 0; overflow: auto; }
+    .sheet-grid {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      font-family: var(--sans);
+    }
+    .sheet-grid th, .sheet-grid td {
+      border: 1px solid #e2e8f0;
+      padding: 0.35rem 0.55rem;
+      min-width: 4.5rem;
+    }
+    .sheet-grid th {
+      background: #f8fafc;
+      font-weight: 650;
+      color: var(--muted);
+      text-align: center;
+    }
+    .sheet-grid .row-head {
+      background: #f8fafc;
+      font-weight: 650;
+      color: var(--muted);
+      text-align: center;
+      width: 2rem;
+    }
+    .cell-changed-old {
+      background: var(--red-bg) !important;
+      box-shadow: inset 0 0 0 2px var(--red);
+      color: #9f1239;
+      font-weight: 700;
+    }
+    .cell-changed-new {
+      background: var(--green-bg) !important;
+      box-shadow: inset 0 0 0 2px var(--green);
+      color: #155e75;
+      font-weight: 700;
+    }
+
+    /* Inline change marks — the key UX */
+    mark.old {
+      background: var(--red-bg);
+      color: #9f1239;
+      text-decoration: line-through;
+      text-decoration-color: rgba(159, 18, 57, 0.5);
+      padding: 0.05rem 0.15rem;
+      border-radius: 3px;
+      box-shadow: inset 0 -2px 0 var(--red);
+    }
+    mark.new {
+      background: var(--green-bg);
+      color: #155e75;
+      padding: 0.05rem 0.15rem;
+      border-radius: 3px;
+      box-shadow: inset 0 -2px 0 var(--green);
+      font-weight: 650;
+    }
+
+    /* Image pages */
+    .img-page .doc-page-body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 240px;
+      background:
+        linear-gradient(45deg, #f1f5f9 25%, transparent 25%),
+        linear-gradient(-45deg, #f1f5f9 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #f1f5f9 75%),
+        linear-gradient(-45deg, transparent 75%, #f1f5f9 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+    .img-placeholder {
+      width: 200px;
+      height: 130px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 0.95rem;
+      border: 1px solid var(--border);
+      box-shadow: var(--paper-shadow);
+    }
+    .img-old { background: linear-gradient(135deg, #64748b, #334155); }
+    .img-new { background: linear-gradient(135deg, #2563eb, #0891b2); }
+
+    /* Text/code page */
+    .code-page .doc-page-body {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      background: #fafafa;
+      line-height: 1.6;
+    }
+    .code-line { display: flex; gap: 0.75rem; }
+    .code-line .ln {
+      color: var(--muted);
+      user-select: none;
+      width: 1.5rem;
+      text-align: right;
+    }
+
+    /* Hidden text-compare mode (old way) */
+    .text-compare-panel { display: none; }
+    body.show-text .doc-view-panel { display: none; }
+    body.show-text .text-compare-panel { display: block; }
+
+    .text-rows {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+    }
+    @media (max-width: 700px) { .text-rows { grid-template-columns: 1fr; } }
+    .text-col {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .text-col-head {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.72rem;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .text-col-head.before { background: var(--red-bg); color: #9f1239; }
+    .text-col-head.after { background: var(--green-bg); color: #155e75; }
+    .text-line {
+      padding: 0.35rem 0.75rem;
+      border-top: 1px solid #f1f5f9;
+    }
+    .text-line.changed.before { background: var(--red-bg); }
+    .text-line.changed.after { background: var(--green-bg); }
+
+    .footer {
+      margin-top: 2rem;
+      padding: 1rem;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .footer strong { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="tag">Preview for your approval</div>
+      <h1>See the actual file — whole page, changes marked on it</h1>
+      <p>
+        Proposed new view: instead of plain text lines, you see the document as a real page
+        (like Word or PDF). Changes are highlighted <em>inside</em> the page. Toggle below to compare with the old text view.
+      </p>
+    </header>
+
+    <div class="approval-banner">
+      <div>
+        <strong>Which view do you prefer?</strong><br />
+        <span>Try both modes — this HTML is a mockup only, not the live app yet.</span>
+      </div>
+      <div class="mode-demo">
+        <button class="mode-btn active" type="button" onclick="setMode('doc')">📄 Document page view (new)</button>
+        <button class="mode-btn" type="button" onclick="setMode('text')">📝 Text lines (old)</button>
+      </div>
+    </div>
+
+    <div class="guide">
+      <strong>How changes appear on the page</strong>
+      <div class="guide-keys">
+        <span class="key"><span class="swatch old"></span> <mark class="old">Crossed out pink</mark> = was in original</span>
+        <span class="key"><span class="swatch new"></span> <mark class="new">Green highlight</mark> = is in current file</span>
+        <span class="key">Left column = original · Right column = current</span>
+      </div>
+    </div>
+
+    <nav class="toc">
+      <a href="#word">Word</a>
+      <a href="#pdf">PDF</a>
+      <a href="#excel">Excel</a>
+      <a href="#ppt">PowerPoint</a>
+      <a href="#image">Image</a>
+      <a href="#text">Text / JSON</a>
+    </nav>
+
+    <!-- WORD -->
+    <h2 class="section-title" id="word">Word · .docx — looks like the real document</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">File Integrity Monitoring Product Brief.docx</div>
+          <div class="card-sub">2 sentences changed inside the document</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">Word</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="view-tabs">
+          <span class="view-tab active">📄 See the document</span>
+          <span class="view-tab">↺ Undo original</span>
+        </div>
+
+        <div class="doc-view-panel">
+          <div class="doc-compare">
+            <div>
+              <div class="doc-col-label before"><span class="dot"></span> Original — page 1</div>
+              <div class="doc-page word-page">
+                <div class="doc-page-toolbar">
+                  <span>Microsoft Word</span>
+                  <span class="page-num">Page 1 of 2</span>
+                </div>
+                <div class="doc-page-body">
+                  <h1>Product Brief</h1>
+                  <p class="subtitle">File Integrity Monitoring System</p>
+                  <p>
+                    File Integrity Monitoring helps teams
+                    <mark class="old">spot unauthorized edits</mark>
+                    across shared folders and critical documents.
+                  </p>
+                  <p>
+                    <strong>Status:</strong>
+                    <mark class="old">Draft for review</mark>
+                  </p>
+                  <p><strong>Owner:</strong> Security Team</p>
+                  <p><strong>Next review:</strong> 30 June 2026</p>
+                  <table>
+                    <tr><th>Item</th><th>Status</th></tr>
+                    <tr><td>Baseline scanning</td><td>Complete</td></tr>
+                    <tr><td>Alert emails</td><td>Planned</td></tr>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="doc-col-label after"><span class="dot"></span> Current — page 1</div>
+              <div class="doc-page word-page">
+                <div class="doc-page-toolbar">
+                  <span>Microsoft Word</span>
+                  <span class="page-num">Page 1 of 2</span>
+                </div>
+                <div class="doc-page-body">
+                  <h1>Product Brief</h1>
+                  <p class="subtitle">File Integrity Monitoring System</p>
+                  <p>
+                    File Integrity Monitoring helps teams
+                    <mark class="new">catch unauthorized edits instantly</mark>
+                    across shared folders and critical documents.
+                  </p>
+                  <p>
+                    <strong>Status:</strong>
+                    <mark class="new">Approved for release</mark>
+                  </p>
+                  <p><strong>Owner:</strong> Security Team</p>
+                  <p><strong>Next review:</strong> 30 June 2026</p>
+                  <table>
+                    <tr><th>Item</th><th>Status</th></tr>
+                    <tr><td>Baseline scanning</td><td>Complete</td></tr>
+                    <tr><td>Alert emails</td><td>Planned</td></tr>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-compare-panel">
+          <p style="color:var(--muted);font-size:0.88rem;margin-bottom:0.75rem;">Old view — plain text lines (what you have now):</p>
+          <div class="text-rows">
+            <div class="text-col">
+              <div class="text-col-head before">Original text</div>
+              <div class="text-line changed before">spot unauthorized edits</div>
+              <div class="text-line changed before">Draft for review</div>
+            </div>
+            <div class="text-col">
+              <div class="text-col-head after">Current text</div>
+              <div class="text-line changed after">catch unauthorized edits instantly</div>
+              <div class="text-line changed after">Approved for release</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- PDF -->
+    <h2 class="section-title" id="pdf">PDF — actual page embedded</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">security-policy.pdf</div>
+          <div class="card-sub">Real PDF shown in browser; changed words highlighted on the page</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">PDF</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body doc-view-panel">
+        <div class="doc-compare">
+          <div>
+            <div class="doc-col-label before"><span class="dot"></span> Original PDF</div>
+            <div class="doc-page pdf-page">
+              <div class="doc-page-toolbar">
+                <span>PDF Viewer</span>
+                <span class="page-num">Page 1</span>
+              </div>
+              <div class="doc-page-body">
+                <div class="pdf-header"><h2>Security Policy</h2></div>
+                <div class="pdf-meta">Version 1.0 · Effective January 2026</div>
+                <p><strong>1. Screen lock</strong></p>
+                <p>All staff must <mark class="old">lock their screens when away</mark> from their desk.</p>
+                <p><strong>2. Incident reporting</strong></p>
+                <p>Report security incidents within 24 hours to the IT helpdesk.</p>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="doc-col-label after"><span class="dot"></span> Current PDF</div>
+            <div class="doc-page pdf-page">
+              <div class="doc-page-toolbar">
+                <span>PDF Viewer</span>
+                <span class="page-num">Page 1</span>
+              </div>
+              <div class="doc-page-body">
+                <div class="pdf-header"><h2>Security Policy</h2></div>
+                <div class="pdf-meta">Version <mark class="new">1.1</mark> · Effective January 2026</div>
+                <p><strong>1. Screen lock</strong></p>
+                <p>All staff must <mark class="new">lock screens and enable MFA when away</mark> from their desk.</p>
+                <p><strong>2. Incident reporting</strong></p>
+                <p>Report security incidents within 24 hours to the IT helpdesk.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p style="margin-top:0.75rem;font-size:0.82rem;color:var(--muted);">
+          In the real app: left/right show the actual PDF file in the browser (like opening it in Chrome), with a change summary strip on top.
+        </p>
+      </div>
+    </article>
+
+    <!-- EXCEL -->
+    <h2 class="section-title" id="excel">Excel — see the spreadsheet grid</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">budget.xlsx</div>
+          <div class="card-sub">Changed cells glow inside the real sheet layout</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">Excel</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body doc-view-panel">
+        <div class="doc-compare">
+          <div>
+            <div class="doc-col-label before"><span class="dot"></span> Original sheet</div>
+            <div class="doc-page sheet-page">
+              <div class="doc-page-toolbar">
+                <span>Sheet: Q1 Budget</span>
+                <span class="page-num">3 cells changed</span>
+              </div>
+              <div class="doc-page-body">
+                <table class="sheet-grid">
+                  <tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th></tr>
+                  <tr><td class="row-head">1</td><td>Department</td><td>Owner</td><td>Amount</td><td>Status</td></tr>
+                  <tr><td class="row-head">2</td><td>Marketing</td><td class="cell-changed-old">Marketing</td><td>5000</td><td>Pending</td></tr>
+                  <tr><td class="row-head">3</td><td>IT</td><td>Ops</td><td>8000</td><td>Approved</td></tr>
+                  <tr><td class="row-head">4</td><td>HR</td><td>People</td><td class="cell-changed-old">12000</td><td>Pending</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="doc-col-label after"><span class="dot"></span> Current sheet</div>
+            <div class="doc-page sheet-page">
+              <div class="doc-page-toolbar">
+                <span>Sheet: Q1 Budget</span>
+                <span class="page-num">3 cells changed</span>
+              </div>
+              <div class="doc-page-body">
+                <table class="sheet-grid">
+                  <tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th></tr>
+                  <tr><td class="row-head">1</td><td>Department</td><td>Owner</td><td>Amount</td><td>Status</td></tr>
+                  <tr><td class="row-head">2</td><td>Marketing</td><td class="cell-changed-new">Growth Marketing</td><td>5000</td><td>Pending</td></tr>
+                  <tr><td class="row-head">3</td><td>IT</td><td>Ops</td><td>8000</td><td>Approved</td></tr>
+                  <tr><td class="row-head">4</td><td>HR</td><td>People</td><td class="cell-changed-new">18500</td><td class="cell-changed-new">Approved</td></tr>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- POWERPOINT -->
+    <h2 class="section-title" id="ppt">PowerPoint — see the slide</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">overview.pptx</div>
+          <div class="card-sub">Slide layout with changed headline highlighted</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">PowerPoint</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body doc-view-panel">
+        <div class="doc-compare">
+          <div>
+            <div class="doc-col-label before"><span class="dot"></span> Original — Slide 1</div>
+            <div class="doc-page slide-page">
+              <div class="doc-page-toolbar">
+                <span>PowerPoint</span>
+                <span class="page-num">Slide 1 of 5</span>
+              </div>
+              <div class="doc-page-body">
+                <h2>Company Overview</h2>
+                <p><mark class="old">Protecting files across every team</mark></p>
+                <span class="slide-footer">Confidential</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="doc-col-label after"><span class="dot"></span> Current — Slide 1</div>
+            <div class="doc-page slide-page">
+              <div class="doc-page-toolbar">
+                <span>PowerPoint</span>
+                <span class="page-num">Slide 1 of 5</span>
+              </div>
+              <div class="doc-page-body">
+                <h2>Company Overview</h2>
+                <p><mark class="new">Protecting files across every team — live demo</mark></p>
+                <span class="slide-footer">Confidential</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- IMAGE -->
+    <h2 class="section-title" id="image">Image — see both pictures full size</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">logo.png</div>
+          <div class="card-sub">Side-by-side image preview (already close to “see the file”)</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">Image</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body doc-view-panel">
+        <div class="doc-compare">
+          <div>
+            <div class="doc-col-label before"><span class="dot"></span> Original image</div>
+            <div class="doc-page img-page">
+              <div class="doc-page-body">
+                <div class="img-placeholder img-old">OLD LOGO</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="doc-col-label after"><span class="dot"></span> Current image</div>
+            <div class="doc-page img-page">
+              <div class="doc-page-body">
+                <div class="img-placeholder img-new">NEW LOGO</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- TEXT -->
+    <h2 class="section-title" id="text">Text / JSON — code on a page</h2>
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">config.json</div>
+          <div class="card-sub">Formatted like a code editor page with changed line highlighted</div>
+        </div>
+        <div class="badges">
+          <span class="badge type">JSON</span>
+          <span class="badge changed">Changed</span>
+        </div>
+      </div>
+      <div class="card-body doc-view-panel">
+        <div class="doc-compare">
+          <div>
+            <div class="doc-col-label before"><span class="dot"></span> Original file</div>
+            <div class="doc-page code-page">
+              <div class="doc-page-toolbar"><span>config.json</span></div>
+              <div class="doc-page-body">
+                <div class="code-line"><span class="ln">1</span>{</div>
+                <div class="code-line"><span class="ln">2</span>  "mode": "<mark class="old">safe</mark>",</div>
+                <div class="code-line"><span class="ln">3</span>  "interval": 1200</div>
+                <div class="code-line"><span class="ln">4</span>}</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="doc-col-label after"><span class="dot"></span> Current file</div>
+            <div class="doc-page code-page">
+              <div class="doc-page-toolbar"><span>config.json</span></div>
+              <div class="doc-page-body">
+                <div class="code-line"><span class="ln">1</span>{</div>
+                <div class="code-line"><span class="ln">2</span>  "mode": "<mark class="new">strict</mark>",</div>
+                <div class="code-line"><span class="ln">3</span>  "interval": 1200</div>
+                <div class="code-line"><span class="ln">4</span>}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <div class="footer">
+      <strong>Approve this direction?</strong> If yes, we'll build this into the real app:
+      Word/PDF/PPT rendered as pages, Excel as a grid, images full-size, with changes marked on the content — not just plain text lines.
+      Open <code>preview-change-viewer.html</code> in your browser and use the toggle at the top to compare old vs new.
+    </div>
+  </div>
+
+  <script>
+    function setMode(mode) {
+      document.body.classList.toggle('show-text', mode === 'text');
+      document.querySelectorAll('.mode-btn').forEach((btn, i) => {
+        btn.classList.toggle('active', (mode === 'doc' && i === 0) || (mode === 'text' && i === 1));
+      });
+    }
+  </script>
+</body>
+</html>

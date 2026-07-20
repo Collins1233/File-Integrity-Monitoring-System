@@ -83,18 +83,42 @@ def _format_line_comparison(before_lines, after_lines, preview_type, document_ty
     return result
 
 
-def _word_to_lines(file_path):
-    doc = Document(file_path)
-    lines = []
-    for paragraph in doc.paragraphs:
-        text = paragraph.text.strip()
+def _collect_paragraph_lines(paragraphs, lines):
+    for paragraph in paragraphs:
+        text = (paragraph.text or "").strip()
         if text:
             lines.append(text)
-    for table in doc.tables:
+
+
+def _collect_table_lines(tables, lines):
+    for table in tables:
         for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            cells = [(cell.text or "").strip() for cell in row.cells]
+            cells = [cell for cell in cells if cell]
             if cells:
                 lines.append(" | ".join(cells))
+
+
+def _word_to_lines(file_path):
+    """Extract readable text from a .docx for side-by-side comparison."""
+    doc = Document(file_path)
+    lines = []
+
+    _collect_paragraph_lines(doc.paragraphs, lines)
+    _collect_table_lines(doc.tables, lines)
+
+    # Headers / footers often hold title or revision text users care about.
+    for section in doc.sections:
+        try:
+            _collect_paragraph_lines(section.header.paragraphs, lines)
+            _collect_table_lines(section.header.tables, lines)
+            _collect_paragraph_lines(section.footer.paragraphs, lines)
+            _collect_table_lines(section.footer.tables, lines)
+        except Exception:
+            continue
+
+    if not lines:
+        lines.append("(No readable text found in this Word document)")
     return lines
 
 

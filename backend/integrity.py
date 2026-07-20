@@ -12,7 +12,7 @@ from file_preview import format_backup_diff
 
 def _build_backup_diff(file_path, old_info):
     backup_path = old_info.get("baseline_copy")
-    extension = old_info.get("extension")
+    extension = (old_info.get("extension") or "").lower()
     if not backup_path or not os.path.exists(backup_path):
         return None
 
@@ -20,9 +20,9 @@ def _build_backup_diff(file_path, old_info):
         diff = format_backup_diff(backup_path, file_path, extension)
         if not diff:
             return None
-        if diff.get("preview_type") != "image" and diff.get("summary", {}).get("total_changes", 0) == 0:
-            return None
 
+        # Always keep a structured original/current compare when we can extract text,
+        # even if total_changes is 0 (e.g. formatting-only Word edits).
         diff["can_restore"] = True
         diff["file_type"] = old_info.get("file_type", "File")
         diff["extension"] = extension
@@ -110,13 +110,12 @@ def _compare_monitor(monitor, generate_report=True):
                 old_lines = old_info.get("content_snapshot", [])
                 new_lines = read_text_file(file_path)
                 differences = format_text_change(old_lines, new_lines)
-                if differences["summary"]["total_changes"] > 0:
-                    differences["preview_type"] = "text"
-                    differences["can_restore"] = file_metadata[file_path]["can_restore"]
-                    differences["file_type"] = old_info.get("file_type", "Text file")
-                    differences["extension"] = old_info.get("extension", "")
-                    text_differences[file_path] = differences
-            elif old_info.get("extension") in BACKUP_FILE_TYPES:
+                differences["preview_type"] = "text"
+                differences["can_restore"] = file_metadata[file_path]["can_restore"]
+                differences["file_type"] = old_info.get("file_type", "Text file")
+                differences["extension"] = old_info.get("extension", "")
+                text_differences[file_path] = differences
+            elif (old_info.get("extension") or "").lower() in BACKUP_FILE_TYPES:
                 backup_diff = _build_backup_diff(file_path, old_info)
                 if backup_diff:
                     text_differences[file_path] = backup_diff

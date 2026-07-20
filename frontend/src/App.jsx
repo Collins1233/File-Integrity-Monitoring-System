@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 
 import FileChangeViewer from './FileChangeViewer';
+import FileDocumentPreview from './FileDocumentPreview';
 import ToastNotification from './ToastNotification';
 import MonitoredFilesPanel from './MonitoredFilesPanel';
 import VersionGate from './VersionGate';
@@ -529,6 +530,7 @@ function App() {
       const data = await res.json();
       if (res.ok) {
         addConsoleLog(`Removed monitor: ${label}`, 'warning');
+        setCheckResult(null);
         setMonitors(data.monitors || []);
         setActiveMonitorId(data.active_monitor_id || null);
         setStatus((prev) => ({
@@ -1141,9 +1143,6 @@ function App() {
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-warning)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       Changed Files ({checkResult.modified_files.length})
                     </h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                      Tap a file to review what changed, or switch to the full original and current file side by side.
-                    </p>
                     <FileChangeViewer
                       modifiedFiles={checkResult.modified_files}
                       textDifferences={checkResult.text_differences}
@@ -1160,39 +1159,17 @@ function App() {
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-danger)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       🗑️ Files That Were Deleted ({checkResult.deleted_files.length})
                     </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {checkResult.deleted_files.map((file, fIndex) => {
-                        const fileName = file.split('/').pop() || file.split('\\').pop();
-                        const canRestore = checkResult.file_metadata?.[file]?.can_restore;
-                        return (
-                          <div key={fIndex} className="glass-panel deleted-file-card">
-                            <span style={{ fontSize: '1.5rem' }}>🗑️</span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ fontWeight: 700 }}>{fileName}</p>
-                              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{file}</p>
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                                This file existed when monitoring was set up but can no longer be found.
-                                {canRestore ? ' You can restore it from the baseline backup.' : ' No backup is available to restore it.'}
-                              </p>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
-                              <span style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700 }}>DELETED</span>
-                              {canRestore && (
-                                <button
-                                  type="button"
-                                  className="btn btn-secondary"
-                                  style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem' }}
-                                  onClick={() => handleRestoreFile(file)}
-                                  disabled={restoringPath === file}
-                                >
-                                  <RotateCcw size={14} className={restoringPath === file ? 'animate-spin' : ''} />
-                                  {restoringPath === file ? 'Restoring…' : 'Restore file'}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="fc-list">
+                      {checkResult.deleted_files.map((file) => (
+                        <FileDocumentPreview
+                          key={file}
+                          filePath={file}
+                          variant="deleted"
+                          fileMeta={checkResult.file_metadata?.[file]}
+                          onRestore={handleRestoreFile}
+                          restoringPath={restoringPath}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1203,21 +1180,15 @@ function App() {
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-success)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       📥 New Files Found ({checkResult.new_files.length})
                     </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {checkResult.new_files.map((file, fIndex) => {
-                        const fileName = file.split('/').pop() || file.split('\\').pop();
-                        return (
-                          <div key={fIndex} className="glass-panel" style={{ padding: '1.25rem 1.5rem', borderLeft: '4px solid var(--color-success)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <span style={{ fontSize: '1.5rem' }}>📄</span>
-                            <div style={{ flex: 1 }}>
-                              <p style={{ fontWeight: 700 }}>{fileName}</p>
-                              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>{file}</p>
-                              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>This file was not present when monitoring was set up. It was added after the security snapshot was taken.</p>
-                            </div>
-                            <span style={{ background: 'var(--color-success-bg)', color: 'var(--color-success)', padding: '0.2rem 0.65rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}>NEW</span>
-                          </div>
-                        );
-                      })}
+                    <div className="fc-list">
+                      {checkResult.new_files.map((file) => (
+                        <FileDocumentPreview
+                          key={file}
+                          filePath={file}
+                          variant="new"
+                          fileMeta={checkResult.file_metadata?.[file]}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
