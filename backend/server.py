@@ -29,6 +29,7 @@ from baseline_store import (
 )
 from integrity import run_integrity_check
 from monitor import monitor_service
+from path_utils import resolve_folder_path, folder_exists
 from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
@@ -239,7 +240,7 @@ def select_folder():
     import platform
 
     os_name = platform.system()
-    picker_timeout = 10
+    picker_timeout = 120 if os_name == "Windows" else 60
 
     try:
         if os_name == "Darwin":
@@ -266,7 +267,9 @@ def select_folder():
                 text=True,
                 timeout=picker_timeout,
             )
-            folder_path = result.stdout.strip()
+            folder_path = result.stdout.strip().strip("\ufeff").strip("\r")
+            if not folder_path and result.stderr:
+                logger.warning("Windows folder picker stderr: %s", result.stderr.strip())
         else:
             try:
                 result = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Select Directory to Monitor"], capture_output=True, text=True, timeout=picker_timeout)
@@ -294,22 +297,25 @@ def select_folder():
 @app.post("/api/create-baseline")
 def api_create_baseline(request: FolderRequest):
     folder_path = normalize_folder_path(request.folder_path) if request.folder_path else ""
-    if not folder_path or not os.path.isdir(folder_path):
+    if not folder_path or not folder_exists(request.folder_path):
         raise HTTPException(status_code=400, detail="Invalid folder path provided.")
     return create_baseline_for_folder(folder_path)
+
+
+@app.post("/api/monitors/folder/resolve")
+def api_resolve_folder_path(request: FolderRequest):
+    """Validate and normalize a folder path without creating a monitor."""
+    return resolve_folder_path(request.folder_path or "")
 
 
 @app.post("/api/monitors/folder")
 def api_add_folder_monitor(request: FolderRequest):
     if not request.folder_path or not request.folder_path.strip():
         raise HTTPException(status_code=400, detail="Enter a folder path.")
-    folder_path = normalize_folder_path(request.folder_path)
-    if not os.path.isdir(folder_path):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Folder not found: {folder_path}. Use a full path or a folder name inside the project.",
-        )
-    return create_baseline_for_folder(folder_path)
+    resolved = resolve_folder_path(request.folder_path)
+    if not resolved["exists"]:
+        raise HTTPException(status_code=400, detail=resolved["message"])
+    return create_baseline_for_folder(resolved["normalized"])
 
 
 @app.post("/api/monitors/files")
@@ -328,7 +334,7 @@ def select_files():
     import platform
 
     os_name = platform.system()
-    picker_timeout = 10
+    picker_timeout = 120 if os_name == "Windows" else 60
 
     try:
         if os_name == "Darwin":

@@ -6,16 +6,7 @@ from datetime import datetime
 
 from scanner import scan_folder_with_options, scan_files_with_options
 from config import BASELINE_FILE, BASELINE_FOLDER, BACKUP_FILE_TYPES, PROJECT_ROOT
-
-
-def normalize_folder_path(folder_path: str) -> str:
-    cleaned = folder_path.strip().strip('"').strip("'").strip()
-    expanded = os.path.expanduser(cleaned)
-    if not os.path.isabs(expanded):
-        expanded = os.path.join(PROJECT_ROOT, expanded)
-    return os.path.normpath(os.path.abspath(expanded))
-
-
+from path_utils import normalize_folder_path, folder_exists
 def find_folder_monitor(folder_path: str, monitors: list[dict] | None = None) -> dict | None:
     normalized = normalize_folder_path(folder_path)
     source = monitors if monitors is not None else load_store().get("monitors", [])
@@ -162,7 +153,7 @@ def _backup_supported_files(files: dict, folder_path: str, monitor_id: str | Non
 
 def add_monitor(folder_path: str, set_active: bool = True) -> dict:
     folder_path = normalize_folder_path(folder_path)
-    if not os.path.isdir(folder_path):
+    if not folder_path or not folder_exists(folder_path):
         raise ValueError(f"Folder not found: {folder_path}")
 
     store = load_store()

@@ -2796,18 +2796,83 @@ body::after {
 }
 
 .monitor-path-input {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+@media (min-width: 720px) {
+  .monitor-path-input {
+    grid-template-columns: 1fr auto;
+    align-items: stretch;
+  }
 }
 
 .monitor-path-input input {
-  flex: 1;
-  min-width: 200px;
-  padding: 0.6rem 0.85rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.75rem 0.85rem;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  font-size: 0.9rem;
+}
+
+.monitor-path-input .monitor-path-add-btn {
+  width: 100%;
+  min-width: 9rem;
+  min-height: 2.85rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  justify-content: center;
+}
+
+@media (min-width: 720px) {
+  .monitor-path-input .monitor-path-add-btn {
+    width: auto;
+  }
+}
+
+.server-offline-banner {
+  line-height: 1.5;
+}
+
+.server-offline-banner strong {
+  color: var(--color-danger);
+}
+
+.dashboard-action-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.dashboard-action-buttons .btn-check-now {
+  min-width: 11rem;
+  flex-shrink: 0;
+}
+
+.dashboard-action-buttons .btn-action-secondary {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.monitoring-status-bar .monitoring-toolbar-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.monitoring-status-bar .monitoring-times {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.monitoring-status-bar .monitoring-pill {
+  flex-shrink: 0;
 }

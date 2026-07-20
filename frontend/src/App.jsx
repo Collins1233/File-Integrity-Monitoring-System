@@ -41,13 +41,23 @@ import {
   getAffectedFiles,
 } from './alertUtils';
 
-import { API_BASE } from './api';
+import { API_BASE, resolveApiBase, isNetworkError, API_CONNECTION_HELP } from './api';
 
 const APP_ICON = `${window.location.origin}/favicon.svg`;
 
 function sanitizeFolderPath(rawPath) {
-  return rawPath.trim().replace(/^["']|["']$/g, '');
+  return rawPath
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .replace(/[\r\n]+/g, '')
+    .replace(/^file:\/\/\/?/i, '')
+    .replace(/^["'`]|["'`]$/g, '');
 }
+
+const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+const FOLDER_PATH_PLACEHOLDER = IS_WINDOWS
+  ? 'C:\\Users\\You\\File-Integrity-Monitoring-System\\demo_files'
+  : '/full/path/to/folder  or  demo_files';
 
 function formatApiError(detail, fallback = 'Request failed') {
   if (typeof detail === 'string') return detail;
@@ -133,6 +143,8 @@ function App() {
     () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
   );
   const seenAlertIds = useRef(new Set());
+  const healthFailures = useRef(0);
+  const busyRef = useRef(false);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
 
@@ -146,6 +158,23 @@ function App() {
     confirmResolver.current = null;
     setConfirmState(null);
   }, []);
+
+  const markServerOnline = useCallback(() => {
+    healthFailures.current = 0;
+    setServerOnline(true);
+  }, []);
+
+  const markServerFailure = useCallback(() => {
+    if (busyRef.current) return;
+    healthFailures.current += 1;
+    if (healthFailures.current >= 2) {
+      setServerOnline(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    busyRef.current = Boolean(monitoring.is_checking || scanProgress.active || loading);
+  }, [monitoring.is_checking, scanProgress.active, loading]);
 
   const addConsoleLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
@@ -189,6 +218,8 @@ function App() {
   const fetchMonitoring = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/monitoring/status`);
+      if (!res.ok) throw new Error('offline');
+      markServerOnline();
       const data = await res.json();
       setMonitoring(data);
 
@@ -212,9 +243,10 @@ function App() {
         }
       }
     } catch (err) {
+      markServerFailure();
       console.error('Error fetching monitoring status:', err);
     }
-  }, [addToast, addConsoleLog]);
+  }, [addToast, addConsoleLog, markServerOnline, markServerFailure]);
 
   const handleToggleMonitoring = async () => {
     try {
@@ -265,15 +297,15 @@ function App() {
       const res = await fetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
-      setServerOnline(true);
+      markServerOnline();
       setStatus(data);
       setMonitors(data.monitors || []);
       setActiveMonitorId(data.active_monitor_id || null);
     } catch (err) {
-      setServerOnline(false);
+      markServerFailure();
       console.error('Error fetching status:', err);
     }
-  }, []);
+  }, [markServerOnline, markServerFailure]);
 
   const fetchReports = async () => {
     try {
@@ -312,9 +344,12 @@ function App() {
   const fetchScanProgress = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/scan/progress`);
-      if (res.ok) setScanProgress(await res.json());
+      if (res.ok) {
+        markServerOnline();
+        setScanProgress(await res.json());
+      }
     } catch {
-      // ignore
+      // ignore transient progress poll errors during scans
     }
   };
 
@@ -324,17 +359,30 @@ function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    fetchStatus();
-    fetchReports();
-    fetchLogs();
-    fetchMonitoring();
-    fetchMonitoredFiles();
-    requestNotificationPermission();
+    let cancelled = false;
+
+    async function boot() {
+      await resolveApiBase();
+      if (cancelled) return;
+      fetchStatus();
+      fetchReports();
+      fetchLogs();
+      fetchMonitoring();
+      fetchMonitoredFiles();
+      requestNotificationPermission();
+    }
+
+    boot();
 
     const monitoringInterval = setInterval(fetchMonitoring, 30000);
-    const healthInterval = setInterval(fetchStatus, 10000);
+    const healthInterval = setInterval(async () => {
+      if (cancelled) return;
+      await resolveApiBase();
+      fetchStatus();
+    }, 10000);
     const progressInterval = setInterval(fetchScanProgress, 1500);
     return () => {
+      cancelled = true;
       clearInterval(monitoringInterval);
       clearInterval(healthInterval);
       clearInterval(progressInterval);
@@ -350,14 +398,14 @@ function App() {
       const res = await fetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
-      setServerOnline(true);
+      markServerOnline();
       setStatus(data);
       setMonitors(data.monitors || []);
       const nextActiveId = monitorId || data.active_monitor_id || null;
       setActiveMonitorId(nextActiveId);
       await fetchMonitoredFiles(nextActiveId);
     } catch (err) {
-      setServerOnline(false);
+      markServerFailure();
       console.error('Error refreshing monitor state:', err);
     }
   };
@@ -391,7 +439,10 @@ function App() {
       }
     } catch (err) {
       console.error(err);
-      addConsoleLog(`Error using folder picker: ${err.message}`, 'warning');
+      addConsoleLog(
+        isNetworkError(err) ? API_CONNECTION_HELP : `Error using folder picker: ${err.message}`,
+        'danger'
+      );
     } finally {
       setFolderLoading(false);
     }
@@ -445,10 +496,17 @@ function App() {
         fetchLogs();
         fetchMonitoring();
       } else {
-        addConsoleLog(`Could not add folder: ${formatApiError(data.detail, 'Invalid or missing folder path')}`, 'danger');
+        const msg = formatApiError(data.detail, 'Invalid or missing folder path');
+        addConsoleLog(`Could not add folder: ${msg}`, 'danger');
+        if (IS_WINDOWS && /not found/i.test(msg)) {
+          addConsoleLog('Windows tip: paste the full path from File Explorer, e.g. C:\\Users\\You\\project\\demo_files', 'info');
+        }
       }
     } catch (err) {
-      addConsoleLog(`Error adding folder: ${err.message}`, 'danger');
+      addConsoleLog(
+        isNetworkError(err) ? API_CONNECTION_HELP : `Error adding folder: ${err.message}`,
+        'danger'
+      );
     } finally {
       setFolderLoading(false);
     }
@@ -666,8 +724,9 @@ function App() {
 
       {!serverOnline && (
         <div className="server-offline-banner">
-          Cannot reach the monitoring server. From the project root run{' '}
-          <code>npm run install:all</code> once, then <code>npm run dev</code>. Reconnecting…
+          <strong>Monitoring server offline.</strong>{' '}
+          {API_CONNECTION_HELP}
+          {' '}Reconnecting…
         </div>
       )}
 
@@ -768,18 +827,16 @@ function App() {
                   <span>Next: {monitoring.active ? formatCheckTime(monitoring.next_check_at) : 'N/A'}</span>
                 </div>
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-primary monitoring-toolbar-btn"
                   onClick={handleCheckNow}
                   disabled={loading || monitoring.is_checking}
-                  style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem' }}
                 >
                   <Zap size={14} />
                   {monitoring.is_checking ? 'Checking…' : 'Check Now'}
                 </button>
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-secondary monitoring-toolbar-btn"
                   onClick={handleToggleMonitoring}
-                  style={{ padding: '0.45rem 0.9rem', fontSize: '0.8rem' }}
                 >
                   {monitoring.enabled ? <BellOff size={14} /> : <Bell size={14} />}
                   {monitoring.enabled ? 'Pause' : 'Resume'}
@@ -858,18 +915,18 @@ function App() {
                       </button>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '420px' }}>
-                      Add one or more folders, or pick specific files. You can combine both. Each target gets its own baseline.
+                      Add one or more folders, or pick specific files. On Windows, paste the full path from File Explorer (e.g. C:\Users\You\project\demo_files).
                     </p>
                     <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
                       <input
                         type="text"
-                        placeholder="Or paste a folder path…"
+                        placeholder={FOLDER_PATH_PLACEHOLDER}
                         value={folderPathInput}
                         onChange={(e) => setFolderPathInput(e.target.value)}
                         disabled={folderLoading}
                       />
-                      <button type="submit" className="btn btn-secondary" disabled={folderLoading}>
-                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add'}
+                      <button type="submit" className="btn btn-secondary monitor-path-add-btn" disabled={folderLoading}>
+                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add folder'}
                       </button>
                     </form>
                   </div>
@@ -907,25 +964,24 @@ function App() {
                       ))}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div className="dashboard-action-buttons">
                       <button
-                        className="btn btn-primary"
+                        className="btn btn-primary btn-check-now"
                         onClick={handleCheckNow}
                         disabled={loading || monitoring.is_checking}
-                        style={{ flex: 1 }}
                       >
                         <Zap size={18} />
                         {loading || monitoring.is_checking ? 'Checking…' : 'Check Now'}
                       </button>
-                      <button className="btn btn-secondary" onClick={() => setActiveTab('files')}>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={() => setActiveTab('files')}>
                         <Files size={16} />
                         View Files
                       </button>
-                      <button className="btn btn-secondary" onClick={handleSelectFolder} disabled={folderLoading}>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading}>
                         <Folder size={16} />
                         {folderLoading ? 'Adding…' : 'Add Folder'}
                       </button>
-                      <button className="btn btn-secondary" onClick={handleSelectFiles} disabled={folderLoading}>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFiles} disabled={folderLoading}>
                         <FileStack size={16} />
                         Add Files
                       </button>
@@ -934,12 +990,12 @@ function App() {
                     <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
                       <input
                         type="text"
-                        placeholder="Paste another folder path…"
+                        placeholder={FOLDER_PATH_PLACEHOLDER}
                         value={folderPathInput}
                         onChange={(e) => setFolderPathInput(e.target.value)}
                         disabled={folderLoading}
                       />
-                      <button type="submit" className="btn btn-secondary" disabled={folderLoading}>
+                      <button type="submit" className="btn btn-secondary monitor-path-add-btn" disabled={folderLoading}>
                         <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add folder'}
                       </button>
                     </form>

@@ -8,22 +8,22 @@ This folder contains sample files for every major supported type.
    `/Users/cliq-tech/Desktop/File-Integrity-Monitoring-System/demo_files`
 2. Wait for the baseline to finish (or run Check Now once).
 
-## Quick tests
+## Quick testseefwfewfd`dsj` hellooo bye byeeee
 
-| File | How to trigger a change |
-|------|-------------------------|
-| welcome.txt | Edit line 2 |
-| confidential.txt | Add a new line |
-| readme.md | Change a heading |
-| config.json | Change `"demo"` to `false` |
-| data.csv | Change Bob's role |
-| memo.rtf | Edit a paragraph |
-| project-memo.docx | Change "Security Team" |
-| budget.xlsx | Change a cell in Budget sheet |
-| overview.pptx | Edit slide 1 subtitle |
-| security-policy.pdf | Regenerate or edit text |
-| logo.png | Replace with another image |
-| badge.jpg | Replace with another image |
+| File                | How to trigger a change       |
+| ------------------- | ----------------------------- |
+| welcome.txt         | Edit line 2                   |
+| confidential.txt    | Add a new line                |
+| readme.md           | Change a heading              |
+| config.json         | Change`"demo"` to `false` |
+| data.csv            | Change Bob's role             |
+| memo.rtf            | Edit a paragraph              |
+| project-memo.docx   | Change "Security Team"        |
+| budget.xlsx         | Change a cell in Budget sheet |
+| overview.pptx       | Edit slide 1 subtitle         |
+| security-policy.pdf | Regenerate or edit text       |
+| logo.png            | Replace with another image    |
+| badge.jpg           | Replace with another image    |
 
 ## What to look for
 
