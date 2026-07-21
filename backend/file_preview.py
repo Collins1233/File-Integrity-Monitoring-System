@@ -100,9 +100,16 @@ def format_backup_diff(old_path: str, new_path: str, extension: str):
     if result is None:
         return None
 
+    media_total = (
+        (result.get("summary") or {}).get("media_added", 0)
+        + (result.get("summary") or {}).get("media_removed", 0)
+        + (result.get("summary") or {}).get("media_replaced", 0)
+    )
+    text_total = (result.get("summary") or {}).get("lines_removed", 0) + (result.get("summary") or {}).get("lines_added", 0)
+
     # Even when extracted text matches (formatting-only change), still return
     # both full documents so the UI can show original vs current side by side.
-    if result.get("summary", {}).get("total_changes", 0) == 0:
+    if text_total == 0 and media_total == 0 and not result.get("message"):
         result["message"] = (
             "The file hash changed, but the readable text looks the same. "
             "This often means formatting, metadata, or an embedded object changed."

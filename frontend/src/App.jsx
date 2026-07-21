@@ -57,8 +57,12 @@ function sanitizeFolderPath(rawPath) {
 
 const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
 const FOLDER_PATH_PLACEHOLDER = IS_WINDOWS
-  ? 'C:\\Users\\You\\File-Integrity-Monitoring-System\\demo_files'
-  : '/full/path/to/folder  or  demo_files';
+  ? 'Or paste a path, e.g. C:\\Users\\You\\demo_files'
+  : 'Or paste a path, e.g. /full/path/to/folder';
+
+const FOLDER_HELP_TEXT = IS_WINDOWS
+  ? 'Use Add Folder to browse in File Explorer, or Add Files to pick specific files. You can also paste a full path below if the picker does not open.'
+  : 'Use Add Folder / Add Files to browse, or paste a folder path below.';
 
 function formatApiError(detail, fallback = 'Request failed') {
   if (typeof detail === 'string') return detail;
@@ -500,7 +504,7 @@ function App() {
         const msg = formatApiError(data.detail, 'Invalid or missing folder path');
         addConsoleLog(`Could not add folder: ${msg}`, 'danger');
         if (IS_WINDOWS && /not found/i.test(msg)) {
-          addConsoleLog('Windows tip: paste the full path from File Explorer, e.g. C:\\Users\\You\\project\\demo_files', 'info');
+          addConsoleLog('Windows tip: if the folder window did not open, paste the full path from File Explorer into the box and click Add folder.', 'info');
         }
       }
     } catch (err) {
@@ -916,8 +920,8 @@ function App() {
                         Add Files
                       </button>
                     </div>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '420px' }}>
-                      Add one or more folders, or pick specific files. On Windows, paste the full path from File Explorer (e.g. C:\Users\You\project\demo_files).
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '480px' }}>
+                      {FOLDER_HELP_TEXT}
                     </p>
                     <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
                       <input

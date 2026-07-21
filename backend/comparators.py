@@ -1,4 +1,8 @@
 import difflib
+import base64
+import hashlib
+import mimetypes
+import zipfile
 
 from docx import Document
 from openpyxl import load_workbook
@@ -137,7 +141,161 @@ def compare_word(old_file, new_file):
 def format_word_change(old_file, new_file):
     before = _word_to_lines(old_file)
     after = _word_to_lines(new_file)
-    return _format_line_comparison(before, after, "document", "word")
+    result = _format_line_comparison(before, after, "document", "word")
+    return _attach_media_changes(result, old_file, new_file, "word/media/")
+
+
+def _attach_media_changes(result: dict, old_file: str, new_file: str, media_prefix: str) -> dict:
+    media = _compare_office_media(old_file, new_file, media_prefix)
+    if not media["items"]:
+        return result
+    result["media_changes"] = media["items"]
+    result["summary"]["media_added"] = media["added"]
+    result["summary"]["media_removed"] = media["removed"]
+    result["summary"]["media_replaced"] = media["replaced"]
+    result["summary"]["total_changes"] = (
+        result["summary"].get("total_changes", 0)
+        + media["added"]
+        + media["removed"]
+        + media["replaced"]
+    )
+    if result["summary"].get("lines_removed", 0) == 0 and result["summary"].get("lines_added", 0) == 0:
+        result["message"] = _media_change_message(media)
+    elif not result.get("message"):
+        result["message"] = _media_change_message(media)
+    return result
+
+
+_IMAGE_MEDIA_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".emf", ".wmf"}
+_THUMBNAIL_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+_MAX_THUMB_BYTES = 350_000
+
+
+def _media_mime(name: str) -> str:
+    mime, _ = mimetypes.guess_type(name)
+    return mime or "application/octet-stream"
+
+
+def _office_media_inventory(file_path: str, media_prefix: str) -> dict:
+    """Map content-hash -> list of media entries inside an Office zip package."""
+    inventory = {}
+    try:
+        with zipfile.ZipFile(file_path, "r") as archive:
+            for name in archive.namelist():
+                if not name.startswith(media_prefix) or name.endswith("/"):
+                    continue
+                basename = name.rsplit("/", 1)[-1]
+                if not basename or basename.startswith("."):
+                    continue
+                extension = ("." + basename.rsplit(".", 1)[-1].lower()) if "." in basename else ""
+                if extension and extension not in _IMAGE_MEDIA_EXTS and not extension.startswith("."):
+                    continue
+                # Include common image types; skip huge non-image binaries by extension filter
+                if extension and extension not in _IMAGE_MEDIA_EXTS:
+                    continue
+                data = archive.read(name)
+                digest = hashlib.sha256(data).hexdigest()
+                entry = {
+                    "name": basename,
+                    "path": name,
+                    "hash": digest,
+                    "size": len(data),
+                    "extension": extension,
+                }
+                if extension in _THUMBNAIL_EXTS and len(data) <= _MAX_THUMB_BYTES:
+                    entry["thumbnail"] = (
+                        f"data:{_media_mime(basename)};base64,{base64.b64encode(data).decode('ascii')}"
+                    )
+                inventory.setdefault(digest, []).append(entry)
+    except (OSError, zipfile.BadZipFile):
+        return {}
+    return inventory
+
+
+def _flatten_media(inventory: dict) -> list:
+    items = []
+    for entries in inventory.values():
+        items.extend(entries)
+    return sorted(items, key=lambda item: item["name"].lower())
+
+
+def _compare_office_media(old_file: str, new_file: str, media_prefix: str) -> dict:
+    old_inv = _office_media_inventory(old_file, media_prefix)
+    new_inv = _office_media_inventory(new_file, media_prefix)
+
+    old_hashes = set(old_inv)
+    new_hashes = set(new_inv)
+    common = old_hashes & new_hashes
+    only_old = old_hashes - new_hashes
+    only_new = new_hashes - old_hashes
+
+    items = []
+    for digest in sorted(only_old):
+        for entry in old_inv[digest]:
+            items.append({
+                "change": "removed",
+                "label": f"Image removed: {entry['name']}",
+                "name": entry["name"],
+                "before": entry,
+                "after": None,
+            })
+    for digest in sorted(only_new):
+        for entry in new_inv[digest]:
+            items.append({
+                "change": "added",
+                "label": f"Image added: {entry['name']}",
+                "name": entry["name"],
+                "before": None,
+                "after": entry,
+            })
+
+    # Same filename, different content → replaced
+    old_by_name = {e["name"]: e for e in _flatten_media(old_inv)}
+    new_by_name = {e["name"]: e for e in _flatten_media(new_inv)}
+    for name in sorted(set(old_by_name) & set(new_by_name)):
+        old_entry = old_by_name[name]
+        new_entry = new_by_name[name]
+        if old_entry["hash"] == new_entry["hash"]:
+            continue
+        # Prefer a single "replaced" card for same filename
+        items = [
+            item for item in items
+            if not (
+                (item["change"] == "removed" and item["name"] == name)
+                or (item["change"] == "added" and item["name"] == name)
+            )
+        ]
+        items.append({
+            "change": "replaced",
+            "label": f"Image replaced: {name}",
+            "name": name,
+            "before": old_entry,
+            "after": new_entry,
+        })
+
+    added = sum(1 for item in items if item["change"] == "added")
+    removed = sum(1 for item in items if item["change"] == "removed")
+    replaced = sum(1 for item in items if item["change"] == "replaced")
+    return {
+        "items": items,
+        "added": added,
+        "removed": removed,
+        "replaced": replaced,
+        "unchanged": len(common),
+    }
+
+
+def _media_change_message(media: dict) -> str:
+    parts = []
+    if media["added"]:
+        parts.append(f"{media['added']} image{'s' if media['added'] != 1 else ''} added")
+    if media["removed"]:
+        parts.append(f"{media['removed']} image{'s' if media['removed'] != 1 else ''} removed")
+    if media["replaced"]:
+        parts.append(f"{media['replaced']} image{'s' if media['replaced'] != 1 else ''} replaced")
+    if not parts:
+        return "Embedded media changed in this document."
+    return "Embedded images changed: " + ", ".join(parts) + "."
 
 
 def _excel_cell_changes(old_book, new_book):
@@ -278,7 +436,8 @@ def compare_powerpoint(old_file, new_file):
 def format_ppt_change(old_file, new_file):
     before = _ppt_to_lines(old_file)
     after = _ppt_to_lines(new_file)
-    return _format_line_comparison(before, after, "presentation", "powerpoint")
+    result = _format_line_comparison(before, after, "presentation", "powerpoint")
+    return _attach_media_changes(result, old_file, new_file, "ppt/media/")
 
 
 def _pdf_to_lines(file_path):

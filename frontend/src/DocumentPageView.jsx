@@ -20,6 +20,7 @@ import {
   parseSheetLines,
   renderDocumentLine,
 } from './documentDiffUtils';
+import MediaChangesPanel from './MediaChangesPanel';
 
 function DocumentLine({ line, globalIndex, diff, side }) {
   const { html, isSection, isChanged } = renderDocumentLine(line, globalIndex, diff, side);
@@ -499,6 +500,7 @@ export function DocumentCompareModal({
         )}
 
         <div className="doc-modal-body">
+          <MediaChangesPanel changes={diff?.media_changes} />
           <DocumentPageCompare filePath={filePath} diff={diff} pageIndex={pageIndex} compact={false} mode={mode} />
         </div>
 

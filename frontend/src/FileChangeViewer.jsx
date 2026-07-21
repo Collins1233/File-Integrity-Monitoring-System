@@ -16,6 +16,7 @@ import {
   DocumentPageCompare,
   ExpandFullViewButton,
 } from './DocumentPageView';
+import MediaChangesPanel from './MediaChangesPanel';
 
 const TYPE_LABELS = {
   word: 'Word',
@@ -76,21 +77,44 @@ function buildSummaryText(diff) {
     const count = diff.summary.cells_changed;
     return `${count} cell${count !== 1 ? 's' : ''} in the spreadsheet changed`;
   }
+
+  const mediaAdded = diff.summary.media_added || 0;
+  const mediaRemoved = diff.summary.media_removed || 0;
+  const mediaReplaced = diff.summary.media_replaced || 0;
+  const mediaTotal = mediaAdded + mediaRemoved + mediaReplaced;
   const removed = diff.summary.lines_removed || 0;
   const added = diff.summary.lines_added || 0;
+
   if (diff.preview_type === 'binary') {
     return 'This file changed (preview not available for this format)';
   }
+
+  if (mediaTotal > 0 && removed === 0 && added === 0) {
+    const parts = [];
+    if (mediaAdded) parts.push(`${mediaAdded} image${mediaAdded !== 1 ? 's' : ''} added`);
+    if (mediaRemoved) parts.push(`${mediaRemoved} image${mediaRemoved !== 1 ? 's' : ''} removed`);
+    if (mediaReplaced) parts.push(`${mediaReplaced} image${mediaReplaced !== 1 ? 's' : ''} replaced`);
+    return parts.join(' · ');
+  }
+
   if (removed === 0 && added === 0) {
     return diff.message
       ? 'File changed — the words look the same (maybe formatting)'
       : 'This file was changed';
   }
+
+  let text = '';
   if (removed > 0 && added > 0) {
-    return `${removed} part${removed !== 1 ? 's' : ''} changed · ${added} part${added !== 1 ? 's' : ''} updated`;
+    text = `${removed} part${removed !== 1 ? 's' : ''} changed · ${added} part${added !== 1 ? 's' : ''} updated`;
+  } else if (removed > 0) {
+    text = `${removed} part${removed !== 1 ? 's' : ''} removed or rewritten`;
+  } else {
+    text = `${added} part${added !== 1 ? 's' : ''} added or updated`;
   }
-  if (removed > 0) return `${removed} part${removed !== 1 ? 's' : ''} removed or rewritten`;
-  return `${added} part${added !== 1 ? 's' : ''} added or updated`;
+  if (mediaTotal > 0) {
+    text += ` · ${mediaTotal} embedded image${mediaTotal !== 1 ? 's' : ''} changed`;
+  }
+  return text;
 }
 
 function ChangeStats({ diff }) {
@@ -98,6 +122,10 @@ function ChangeStats({ diff }) {
   const removed = diff.summary.lines_removed || 0;
   const added = diff.summary.lines_added || 0;
   const cells = diff.summary.cells_changed;
+  const mediaAdded = diff.summary.media_added || 0;
+  const mediaRemoved = diff.summary.media_removed || 0;
+  const mediaReplaced = diff.summary.media_replaced || 0;
+
   if (cells != null) {
     return (
       <div className="fc-stats">
@@ -105,11 +133,18 @@ function ChangeStats({ diff }) {
       </div>
     );
   }
-  if (removed === 0 && added === 0) return null;
+
+  if (removed === 0 && added === 0 && mediaAdded === 0 && mediaRemoved === 0 && mediaReplaced === 0) {
+    return null;
+  }
+
   return (
     <div className="fc-stats">
       {removed > 0 && <span className="fc-stat before">{removed} changed in original</span>}
       {added > 0 && <span className="fc-stat after">{added} changed in current</span>}
+      {mediaAdded > 0 && <span className="fc-stat after">{mediaAdded} image{mediaAdded !== 1 ? 's' : ''} added</span>}
+      {mediaRemoved > 0 && <span className="fc-stat before">{mediaRemoved} image{mediaRemoved !== 1 ? 's' : ''} removed</span>}
+      {mediaReplaced > 0 && <span className="fc-stat after">{mediaReplaced} image{mediaReplaced !== 1 ? 's' : ''} replaced</span>}
     </div>
   );
 }
@@ -226,6 +261,7 @@ function FileChangeCard({
               <>
                 <ChangeStats diff={diff} />
                 {diff.message && <p className="fc-note">{diff.message}</p>}
+                <MediaChangesPanel changes={diff.media_changes} />
                 <p className="fc-intro">
                   See the file as a real page with changes highlighted inside it.
                   Open full view to browse all pages and jump between changes.
@@ -258,7 +294,10 @@ function FileChangeCard({
                     </div>
                   </>
                 ) : (
-                  <ChangePairsList diff={diff} />
+                  <>
+                    <MediaChangesPanel changes={diff.media_changes} />
+                    <ChangePairsList diff={diff} />
+                  </>
                 )}
               </>
             ) : (
