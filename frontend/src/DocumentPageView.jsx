@@ -311,9 +311,12 @@ function pageLabelForStyle(style) {
 }
 
 function DocumentSide({
-  filePath, diff, side, pageIndex, style, compact, singleSide,
+  filePath, diff, side, pageIndex, style, compact, singleSide, preferTextDiff = false,
 }) {
   const lines = side === 'before' ? diff?.before || [] : diff?.after || [];
+  const hasTextChanges = Boolean(
+    diff?.changed_before_lines?.length || diff?.changed_after_lines?.length,
+  );
 
   if (style === 'image') {
     return <ImageDocumentPage filePath={filePath} side={side} />;
@@ -333,7 +336,13 @@ function DocumentSide({
   if (style === 'html' && !compact) {
     return <HtmlEmbedPage filePath={filePath} side={side} />;
   }
-  if (style === 'word' && !compact && filePath.toLowerCase().endsWith('.docx')) {
+  if (
+    style === 'word'
+    && !compact
+    && filePath.toLowerCase().endsWith('.docx')
+    && !preferTextDiff
+    && !hasTextChanges
+  ) {
     return <WordHtmlPage filePath={filePath} side={side} diff={diff} pageIndex={pageIndex} compact={compact} />;
   }
 
@@ -362,13 +371,16 @@ export function DocumentPageCompare({
   const totalPages = countTotalPages(diff, filePath, style);
   const showBefore = mode !== 'current-only';
   const showAfter = mode !== 'baseline-only';
+  const preferTextDiff = mode === 'compare' && Boolean(
+    diff?.changed_before_lines?.length || diff?.changed_after_lines?.length,
+  );
 
   if (mode === 'baseline-only') {
     return (
       <div className={`doc-compare doc-compare-single ${compact ? 'doc-compare-compact' : ''}`}>
         <div className="doc-compare-col">
           <div className="doc-col-label before"><span className="doc-col-dot" /> Original (saved copy)</div>
-          <DocumentSide filePath={filePath} diff={diff} side="before" pageIndex={pageIndex} style={style} compact={compact} singleSide />
+          <DocumentSide filePath={filePath} diff={diff} side="before" pageIndex={pageIndex} style={style} compact={compact} singleSide preferTextDiff={preferTextDiff} />
         </div>
       </div>
     );
@@ -379,7 +391,7 @@ export function DocumentPageCompare({
       <div className={`doc-compare doc-compare-single ${compact ? 'doc-compare-compact' : ''}`}>
         <div className="doc-compare-col">
           <div className="doc-col-label after"><span className="doc-col-dot" /> Current file on disk</div>
-          <DocumentSide filePath={filePath} diff={diff} side="after" pageIndex={pageIndex} style={style} compact={compact} singleSide />
+          <DocumentSide filePath={filePath} diff={diff} side="after" pageIndex={pageIndex} style={style} compact={compact} singleSide preferTextDiff={preferTextDiff} />
         </div>
       </div>
     );
@@ -390,13 +402,13 @@ export function DocumentPageCompare({
       {showBefore && (
         <div className="doc-compare-col">
           <div className="doc-col-label before"><span className="doc-col-dot" /> Original</div>
-          <DocumentSide filePath={filePath} diff={diff} side="before" pageIndex={pageIndex} style={style} compact={compact} />
+          <DocumentSide filePath={filePath} diff={diff} side="before" pageIndex={pageIndex} style={style} compact={compact} preferTextDiff={preferTextDiff} />
         </div>
       )}
       {showAfter && (
         <div className="doc-compare-col">
           <div className="doc-col-label after"><span className="doc-col-dot" /> Current</div>
-          <DocumentSide filePath={filePath} diff={diff} side="after" pageIndex={pageIndex} style={style} compact={compact} />
+          <DocumentSide filePath={filePath} diff={diff} side="after" pageIndex={pageIndex} style={style} compact={compact} preferTextDiff={preferTextDiff} />
         </div>
       )}
       {!compact && totalPages > 1 && (

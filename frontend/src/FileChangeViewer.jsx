@@ -168,12 +168,20 @@ function ChangePairsList({ diff }) {
           <div className="fc-pair-body">
             <div className="fc-pair-side before">
               <span className="fc-pair-label">Before</span>
-              <p>{before[changedBefore[index]] ?? <em className="fc-pair-empty">Removed</em>}</p>
+              <p className={before[changedBefore[index]] == null ? 'fc-pair-empty-line' : ''}>
+                {before[changedBefore[index]] ?? <em className="fc-pair-empty">(nothing here)</em>}
+              </p>
             </div>
             <div className="fc-pair-arrow" aria-hidden="true">→</div>
             <div className="fc-pair-side after">
               <span className="fc-pair-label">Now</span>
-              <p>{after[changedAfter[index]] ?? <em className="fc-pair-empty">Added</em>}</p>
+              <p className={after[changedAfter[index]] == null ? 'fc-pair-added-line' : 'fc-pair-changed-line'}>
+                {after[changedAfter[index]] != null ? (
+                  <mark className="doc-mark-new">{after[changedAfter[index]]}</mark>
+                ) : (
+                  <em className="fc-pair-empty">(removed)</em>
+                )}
+              </p>
             </div>
           </div>
         </article>

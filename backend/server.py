@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import asyncio
+import subprocess
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -34,7 +35,8 @@ from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
-from config import APP_VERSION, MAX_REPORTS_RETAINED, PROJECT_ROOT, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
+from config import APP_VERSION, DEV_SESSION_FILE, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
+from native_picker import pick_files, pick_folder
 from textdiff import read_text_file
 from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
 
@@ -92,11 +94,24 @@ class AcceptBaselineRequest(BaseModel):
     monitor_id: Optional[str] = None
 
 
+def _read_dev_session() -> str:
+    try:
+        if os.path.exists(DEV_SESSION_FILE):
+            with open(DEV_SESSION_FILE, "r", encoding="utf-8") as file:
+                session = file.read().strip()
+                if session:
+                    return session
+    except OSError:
+        pass
+    return ""
+
+
 def _status_payload():
     monitors = get_monitors()
     active = get_active_monitor()
     return {
         "app_version": APP_VERSION,
+        "dev_session": _read_dev_session(),
         "has_baseline": len(monitors) > 0,
         "folder_path": active["folder_path"] if active else "",
         "created_at": active["created_at"] if active else "",
@@ -236,48 +251,12 @@ def api_restore_file(request: RestoreFileRequest):
 
 @app.post("/api/select-folder")
 def select_folder():
-    import subprocess
     import platform
 
-    os_name = platform.system()
-    picker_timeout = 120 if os_name == "Windows" else 60
+    picker_timeout = 120 if platform.system() == "Windows" else 60
 
     try:
-        if os_name == "Darwin":
-            apple_script = (
-                'tell application "System Events"\n'
-                '    activate\n'
-                'end tell\n'
-                'set chosen to choose folder with prompt "Select the folder to monitor:"\n'
-                'POSIX path of chosen'
-            )
-            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=picker_timeout)
-            folder_path = result.stdout.strip()
-        elif os_name == "Windows":
-            ps_script = (
-                'Add-Type -AssemblyName System.Windows.Forms; '
-                '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
-                '$d.Description = "Select Directory to Monitor"; '
-                '$d.ShowNewFolderButton = $false; '
-                'if ($d.ShowDialog() -eq "OK") { Write-Output $d.SelectedPath }'
-            )
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Sta", "-Command", ps_script],
-                capture_output=True,
-                text=True,
-                timeout=picker_timeout,
-            )
-            folder_path = result.stdout.strip().strip("\ufeff").strip("\r")
-            if not folder_path and result.stderr:
-                logger.warning("Windows folder picker stderr: %s", result.stderr.strip())
-        else:
-            try:
-                result = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Select Directory to Monitor"], capture_output=True, text=True, timeout=picker_timeout)
-                folder_path = result.stdout.strip()
-            except FileNotFoundError:
-                result = subprocess.run(["kdialog", "--getexistingdirectory", "/", "--title", "Select Directory to Monitor"], capture_output=True, text=True, timeout=picker_timeout)
-                folder_path = result.stdout.strip()
-
+        folder_path = pick_folder(timeout=picker_timeout)
         if folder_path:
             return create_baseline_for_folder(folder_path)
         return {"folder_path": "", "info": "Folder selection was cancelled."}
@@ -285,7 +264,7 @@ def select_folder():
         logger.warning("Folder picker timed out; falling back to manual path entry.")
         return {
             "folder_path": "",
-            "info": "Folder picker could not open in this environment. Please paste the folder path manually in the text box and click Add.",
+            "info": "Folder picker could not open in this environment. Please paste the folder path manually in the text box and click Add folder.",
         }
     except FileNotFoundError:
         return {"folder_path": "", "info": "Native folder picker is not available on this system. Please paste the folder path manually."}
@@ -330,51 +309,12 @@ def api_add_files_monitor(request: FilesRequest):
 
 @app.post("/api/select-files")
 def select_files():
-    import subprocess
     import platform
 
-    os_name = platform.system()
-    picker_timeout = 120 if os_name == "Windows" else 60
+    picker_timeout = 120 if platform.system() == "Windows" else 60
 
     try:
-        if os_name == "Darwin":
-            apple_script = (
-                'tell application "System Events"\n'
-                '    activate\n'
-                'end tell\n'
-                'set chosen to choose file with prompt "Select files to monitor:" with multiple selections allowed\n'
-                'set output to ""\n'
-                'repeat with f in chosen\n'
-                '    set output to output & (POSIX path of f) & linefeed\n'
-                'end repeat\n'
-                'return output'
-            )
-            result = subprocess.run(["osascript", "-e", apple_script], capture_output=True, text=True, timeout=picker_timeout)
-            file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        elif os_name == "Windows":
-            ps_script = (
-                'Add-Type -AssemblyName System.Windows.Forms; '
-                '$d = New-Object System.Windows.Forms.OpenFileDialog; '
-                '$d.Multiselect = $true; '
-                '$d.Title = "Select Files to Monitor"; '
-                'if ($d.ShowDialog() -eq "OK") { $d.FileNames -join "`n" }'
-            )
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Sta", "-Command", ps_script],
-                capture_output=True,
-                text=True,
-                timeout=picker_timeout,
-            )
-            file_paths = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        else:
-            result = subprocess.run(
-                ["zenity", "--file-selection", "--multiple", "--separator=|", "--title=Select Files to Monitor"],
-                capture_output=True,
-                text=True,
-                timeout=picker_timeout,
-            )
-            file_paths = [part.strip() for part in result.stdout.split("|") if part.strip()]
-
+        file_paths = pick_files(timeout=picker_timeout)
         if file_paths:
             return create_baseline_for_files(file_paths)
         return {"folder_path": "", "info": "File selection was cancelled."}
@@ -614,11 +554,20 @@ def api_delete_report(filename: str):
 
 
 def _parse_logs():
-    log_file = "fim_log.txt"
-    if not os.path.exists(log_file):
+    log_paths = [LOG_FILE]
+    legacy_log = os.path.join(os.path.dirname(__file__), "fim_log.txt")
+    if legacy_log not in log_paths:
+        log_paths.append(legacy_log)
+
+    lines = []
+    for log_path in log_paths:
+        if not os.path.exists(log_path):
+            continue
+        with open(log_path, "r", encoding="utf-8") as file:
+            lines.extend(file.readlines())
+
+    if not lines:
         return []
-    with open(log_file, "r", encoding="utf-8") as file:
-        lines = file.readlines()
     parsed = []
     for line in lines:
         parts = line.strip().split(" - ", 1)

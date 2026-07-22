@@ -221,6 +221,24 @@ export function renderDocumentLine(line, globalIndex, diff, side) {
     ? (diff?.after?.[pairedIndex] ?? '')
     : (diff?.before?.[pairedIndex] ?? '');
 
+  if (side === 'after' && isChanged && !otherLine?.trim() && (line || afterLine)) {
+    const text = line || afterLine;
+    return {
+      html: `<mark class="doc-mark-new doc-mark-added">${escapeHtml(text)}</mark>`,
+      isSection: false,
+      isChanged: true,
+    };
+  }
+
+  if (side === 'before' && isChanged && !otherLine?.trim() && (line || beforeLine)) {
+    const text = line || beforeLine;
+    return {
+      html: `<mark class="doc-mark-old doc-mark-removed">${escapeHtml(text)}</mark>`,
+      isSection: false,
+      isChanged: true,
+    };
+  }
+
   const html = highlightDiff(
     side === 'before' ? (line || beforeLine) : (line || afterLine),
     side === 'before' ? otherLine : otherLine,

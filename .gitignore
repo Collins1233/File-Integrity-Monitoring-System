@@ -17,6 +17,8 @@ node_modules/
 # Generated files
 baseline.json
 fim_log.txt
+.fim-dev-session
+settings.json
 
 baseline_files/
 reports/

@@ -64,6 +64,8 @@ const FOLDER_HELP_TEXT = IS_WINDOWS
   ? 'Use Add Folder to browse in File Explorer, or Add Files to pick specific files. You can also paste a full path below if the picker does not open.'
   : 'Use Add Folder / Add Files to browse, or paste a folder path below.';
 
+const DEV_SESSION_KEY = 'fim_dev_session';
+
 function formatApiError(detail, fallback = 'Request failed') {
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
@@ -148,6 +150,7 @@ function App() {
     () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
   );
   const seenAlertIds = useRef(new Set());
+  const devSessionRef = useRef(sessionStorage.getItem(DEV_SESSION_KEY) || '');
   const healthFailures = useRef(0);
   const busyRef = useRef(false);
   const confirmResolver = useRef(null);
@@ -230,6 +233,8 @@ function App() {
 
       if (data.last_result?.success) {
         setCheckResult(data.last_result);
+      } else {
+        setCheckResult(null);
       }
 
       const alertsRes = await fetch(`${API_BASE}/api/monitoring/alerts`);
@@ -303,6 +308,26 @@ function App() {
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
       markServerOnline();
+
+      const devSession = data.dev_session || '';
+      if (devSession && devSessionRef.current && devSessionRef.current !== devSession) {
+        setCheckResult(null);
+        setLogs([{
+          timestamp: new Date().toLocaleTimeString(),
+          message: 'New dev session — dashboard reset.',
+          type: 'info',
+        }]);
+        setToasts([]);
+        setMonitoredFiles([]);
+        setPreviewReport(null);
+        setSystemLogs([]);
+        seenAlertIds.current = new Set();
+      }
+      if (devSession) {
+        devSessionRef.current = devSession;
+        sessionStorage.setItem(DEV_SESSION_KEY, devSession);
+      }
+
       setStatus(data);
       setMonitors(data.monitors || []);
       setActiveMonitorId(data.active_monitor_id || null);
@@ -369,7 +394,8 @@ function App() {
     async function boot() {
       await resolveApiBase();
       if (cancelled) return;
-      fetchStatus();
+      await fetchStatus();
+      if (cancelled) return;
       fetchReports();
       fetchLogs();
       fetchMonitoring();
@@ -397,6 +423,10 @@ function App() {
   useEffect(() => {
     if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
   }, [activeTab, status.has_baseline, activeMonitorId]);
+
+  useEffect(() => {
+    if (activeTab === 'logs') fetchLogs();
+  }, [activeTab]);
 
   const refreshMonitorState = async (monitorId) => {
     try {
@@ -1224,7 +1254,7 @@ function App() {
             </div>
             <div className="terminal-body" style={{ height: '450px' }}>
               {systemLogs.length === 0 ? (
-                <span className="text-muted">No logs recorded yet.</span>
+                <span className="terminal-empty">No logs recorded yet.</span>
               ) : (
                 systemLogs.map((log, index) => (
                   <div key={index} className="log-line">

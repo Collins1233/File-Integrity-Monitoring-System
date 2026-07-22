@@ -865,7 +865,8 @@ body::after {
 }
 
 .terminal-body {
-  background-color: #0f172a;    /* Deep ink background for terminal logs */
+  background-color: #0f172a;
+  border: 1px solid #1e293b;
   border-radius: 8px;
   padding: 1.5rem;
   font-family: var(--font-mono);
@@ -873,22 +874,42 @@ body::after {
   overflow-y: auto;
   flex: 1;
   line-height: 1.7;
+  color: #e2e8f0;
 }
 
 .log-line {
   margin-bottom: 0.6rem;
   display: flex;
   gap: 1rem;
+  color: #e2e8f0;
 }
 
 .log-time {
-  color: var(--color-gold);
+  color: #7dd3fc;
   flex-shrink: 0;
   font-weight: 600;
 }
 
 .log-msg {
-  color: #f3f0ea;
+  color: #f8fafc;
+}
+
+.terminal-body .text-muted,
+.terminal-body .terminal-empty {
+  color: #94a3b8;
+}
+
+.terminal-body .text-success { color: #86efac; }
+.terminal-body .text-warning { color: #fde047; }
+.terminal-body .text-danger { color: #fda4af; }
+.terminal-body .text-info { color: #93c5fd; }
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-secondary {
+  color: var(--text-secondary);
 }
 
 .text-success { color: #86efac; }
@@ -2197,6 +2218,16 @@ body::after {
   font-weight: 650;
 }
 
+.doc-mark-added,
+.doc-mark-removed {
+  display: inline;
+}
+
+.fc-pair-added-line mark,
+.fc-pair-changed-line mark {
+  display: inline;
+}
+
 .doc-page-slide .doc-slide-body {
   min-height: 160px;
   display: flex;
@@ -2570,8 +2601,17 @@ body::after {
 [data-theme="dark"] .terminal-body,
 [data-theme="dark"] .monitored-file-preview pre {
   background-color: #000000;
-  color: #e5e5e5;
+  color: #ffffff;
   border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .terminal-body .log-line,
+[data-theme="dark"] .terminal-body .log-msg {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .terminal-body .log-time {
+  color: #7dd3fc;
 }
 
 [data-theme="dark"] .glass-panel {
@@ -2586,6 +2626,44 @@ body::after {
 [data-theme="dark"] .shell-chrome.top-bar {
   background-color: #000000;
   border-bottom-color: #262626;
+}
+
+[data-theme="dark"] .doc-line,
+[data-theme="dark"] .doc-page-body,
+[data-theme="dark"] .doc-word-html-body {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .doc-mark-old {
+  background: rgba(225, 29, 72, 0.35);
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.55);
+}
+
+[data-theme="dark"] .doc-mark-new,
+[data-theme="dark"] .doc-mark-added {
+  background: rgba(8, 145, 178, 0.45);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .doc-line-changed-before,
+[data-theme="dark"] .doc-line-changed-after {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .fc-line.is-changed-before .fc-text,
+[data-theme="dark"] .fc-line.is-changed-after .fc-text {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .fc-pair-side p,
+[data-theme="dark"] .fc-pair-side mark {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .doc-page-code .doc-page-body {
+  background: #0a0a0a;
+  color: #ffffff;
 }
 
 /* Version gate */
