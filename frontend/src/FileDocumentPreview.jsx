@@ -81,7 +81,7 @@ export default function FileDocumentPreview({
               <span className="fc-card-name">{fileName}</span>
               <span className="fc-card-summary">
                 {variant === 'deleted'
-                  ? 'File removed from disk — view the saved original'
+                  ? 'File removed from disk. View the saved original'
                   : 'New file added after monitoring started'}
               </span>
               <span className="fc-card-path" title={filePath}>{filePath}</span>
@@ -120,7 +120,7 @@ export default function FileDocumentPreview({
                 <div className="doc-expand-row">
                   <ExpandFullViewButton
                     onClick={() => setModalOpen(true)}
-                    label="Open full view — browse all pages"
+                    label="Open full view: browse all pages"
                   />
                 </div>
               </>

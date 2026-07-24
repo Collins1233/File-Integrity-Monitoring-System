@@ -2,7 +2,7 @@
   "name": "file-integrity-monitoring-system",
   "private": true,
   "version": "2.0.0",
-  "description": "File Integrity Monitoring System — React frontend + Python API",
+  "description": "File Integrity Monitoring System: React frontend + Python API",
   "scripts": {
     "predev": "node scripts/free-dev-ports.js && node scripts/reset-dev-state.js && node scripts/setup-check.js",
     "dev": "concurrently -k -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",

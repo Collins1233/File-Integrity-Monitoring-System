@@ -314,7 +314,7 @@ function App() {
         setCheckResult(null);
         setLogs([{
           timestamp: new Date().toLocaleTimeString(),
-          message: 'New dev session — dashboard reset.',
+          message: 'New dev session. Dashboard reset.',
           type: 'info',
         }]);
         setToasts([]);
@@ -664,13 +664,26 @@ function App() {
       if (res.ok) {
         addConsoleLog(`Restored file from backup: ${path}`, 'success');
         fetchMonitoredFiles();
-        if (checkResult) {
-          const checkRes = await fetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
-          if (checkRes.ok) {
-            const newResult = await checkRes.json();
-            setCheckResult(newResult);
-          }
+        // Prefer server last_result after restore (file removed from change lists).
+        // Do not auto re-check: that was treating the undo as a fresh change/new file.
+        if (data.last_result) {
+          setCheckResult(data.last_result);
+        } else if (checkResult) {
+          const samePath = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+          setCheckResult({
+            ...checkResult,
+            modified_files: (checkResult.modified_files || []).filter((p) => !samePath(p, path)),
+            deleted_files: (checkResult.deleted_files || []).filter((p) => !samePath(p, path)),
+            new_files: (checkResult.new_files || []).filter((p) => !samePath(p, path)),
+            text_differences: Object.fromEntries(
+              Object.entries(checkResult.text_differences || {}).filter(([p]) => !samePath(p, path))
+            ),
+            file_metadata: Object.fromEntries(
+              Object.entries(checkResult.file_metadata || {}).filter(([p]) => !samePath(p, path))
+            ),
+          });
         }
+        fetchMonitoring();
       } else {
         addConsoleLog(`Restore failed: ${data.detail}`, 'danger');
       }

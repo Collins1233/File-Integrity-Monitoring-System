@@ -306,7 +306,7 @@ def _excel_cell_changes(old_book, new_book):
         if sheet_name not in old_book.sheetnames:
             changes.append({
                 "sheet": sheet_name,
-                "cell": "—",
+                "cell": "(none)",
                 "before": "(sheet did not exist)",
                 "after": "(new sheet added)",
             })
@@ -314,7 +314,7 @@ def _excel_cell_changes(old_book, new_book):
         if sheet_name not in new_book.sheetnames:
             changes.append({
                 "sheet": sheet_name,
-                "cell": "—",
+                "cell": "(none)",
                 "before": "(sheet existed)",
                 "after": "(sheet removed)",
             })
@@ -451,7 +451,7 @@ def _pdf_to_lines(file_path):
             lines.append(f"── Page {index} ──")
             lines.extend(line for line in text.splitlines() if line.strip())
     if not lines:
-        lines.append("(No extractable text in this PDF — it may be image-based or scanned)")
+        lines.append("(No extractable text in this PDF. It may be image based or scanned)")
     return lines
 
 

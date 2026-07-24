@@ -6,7 +6,7 @@
 export let API_BASE = '';
 
 export const API_CONNECTION_HELP =
-  'API not reachable. From the project root run: npm run install:all — then npm run dev. Keep that terminal open (you must see both [api] and [web]). Do not run only the frontend folder.';
+  'API not reachable. From the project root run: npm run install:all then npm run dev. Keep that terminal open (you must see both [api] and [web]). Do not run only the frontend folder.';
 
 function devCandidates() {
   return [

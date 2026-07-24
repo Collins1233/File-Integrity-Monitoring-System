@@ -289,16 +289,41 @@ def restore_file(file_path: str, monitor_id: str | None = None) -> dict:
 
     info = monitor["files"].get(file_path)
     if not info:
+        # Windows path casing / slash differences
+        for key in list(monitor["files"].keys()):
+            if os.path.normcase(os.path.normpath(key)) == os.path.normcase(os.path.normpath(file_path)):
+                file_path = key
+                info = monitor["files"][key]
+                break
+    if not info:
         return {"success": False, "message": "File not found in baseline."}
 
     backup_path = info.get("baseline_copy")
     if not backup_path or not os.path.exists(backup_path):
         return {"success": False, "message": "No backup copy available for this file."}
 
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     shutil.copy2(backup_path, file_path)
 
-    return {"success": True, "restored_path": file_path}
+    # Refresh baseline for this file so the restored content is the known good state.
+    # Avoids the next check treating the undo as a modified/new file.
+    scanned = scan_files_with_options([file_path])
+    refreshed = scanned.get(file_path) or next(iter(scanned.values()), None)
+    if refreshed:
+        refreshed["baseline_copy"] = backup_path
+        # Keep the original baseline path key so comparisons stay stable.
+        monitor["files"][file_path] = refreshed
+
+        store = load_store()
+        for index, item in enumerate(store["monitors"]):
+            if item["id"] == monitor["id"]:
+                store["monitors"][index] = monitor
+                break
+        _save_store(store)
+
+    return {"success": True, "restored_path": file_path, "baseline_refreshed": bool(refreshed)}
 
 
 def remove_monitor(monitor_id: str) -> bool:

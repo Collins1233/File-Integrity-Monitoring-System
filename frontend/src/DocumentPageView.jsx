@@ -412,7 +412,7 @@ export function DocumentPageCompare({
         </div>
       )}
       {!compact && totalPages > 1 && (
-        <p className="doc-page-hint">Page {pageIndex + 1} of {totalPages} — open full view to browse all pages</p>
+        <p className="doc-page-hint">Page {pageIndex + 1} of {totalPages}. Open full view to browse all pages</p>
       )}
     </div>
   );
@@ -495,8 +495,8 @@ export function DocumentCompareModal({
             <h2>{modalTitle}</h2>
             <p>
               {mode === 'compare'
-                ? 'Original (left) vs current (right) — browse pages and jump between changes'
-                : 'Scroll through the full document — use page buttons below'}
+                ? 'Original (left) vs current (right). Browse pages and jump between changes'
+                : 'Scroll through the full document. Use page buttons below'}
             </p>
           </div>
           <button type="button" className="doc-modal-close" onClick={onClose} aria-label="Close">
@@ -559,7 +559,7 @@ export function DocumentCompareModal({
 
           {canRestore && onRestore && (
             <button type="button" className="btn btn-secondary doc-restore-modal" onClick={() => onRestore(filePath)} disabled={isRestoring}>
-              Undo — restore the original file
+              Undo: restore the original file
             </button>
           )}
         </footer>

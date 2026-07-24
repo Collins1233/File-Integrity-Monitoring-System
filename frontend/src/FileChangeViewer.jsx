@@ -99,7 +99,7 @@ function buildSummaryText(diff) {
 
   if (removed === 0 && added === 0) {
     return diff.message
-      ? 'File changed — the words look the same (maybe formatting)'
+      ? 'File changed. The words look the same (maybe formatting)'
       : 'This file was changed';
   }
 
@@ -323,7 +323,7 @@ function FileChangeCard({
                   disabled={isRestoring}
                 >
                   <RotateCcw size={16} className={isRestoring ? 'animate-spin' : ''} />
-                  {isRestoring ? 'Restoring…' : 'Undo — restore the original file'}
+                  {isRestoring ? 'Restoring…' : 'Undo: restore the original file'}
                 </button>
                 <span className="fc-hint">
                   This replaces the current file with the backup from when monitoring started.
@@ -362,7 +362,7 @@ export default function FileChangeViewer({
       <div className="fc-list-banner">
         <strong>How to read this</strong>
         <span>
-          Tap a file to see the document as a page — original on the left, current on the right.
+          Tap a file to see the document as a page: original on the left, current on the right.
           Pink = old, green = new. Use <strong>Open full view</strong> for big files to browse all pages.
         </span>
       </div>

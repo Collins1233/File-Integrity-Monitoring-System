@@ -35,7 +35,7 @@ from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
-from config import APP_VERSION, DEV_SESSION_FILE, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
+from config import APP_VERSION, DEV_SESSION_FILE, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, REPORT_FOLDER, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
 from native_picker import pick_files, pick_folder
 from textdiff import read_text_file
 from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
@@ -246,7 +246,43 @@ def api_restore_file(request: RestoreFileRequest):
     result = restore_file(request.path, request.monitor_id)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "Restore failed."))
-    return result
+
+    restored = result.get("restored_path") or request.path
+    # Drop this file from the latest check result / alerts so undo is not treated as a new change.
+    last = monitor_service.last_result
+    if isinstance(last, dict):
+        for key in ("modified_files", "deleted_files", "new_files"):
+            paths = last.get(key) or []
+            last[key] = [p for p in paths if p != restored and os.path.normcase(os.path.normpath(p)) != os.path.normcase(os.path.normpath(restored))]
+        diffs = last.get("text_differences") or {}
+        diffs.pop(restored, None)
+        for key in list(diffs.keys()):
+            if os.path.normcase(os.path.normpath(key)) == os.path.normcase(os.path.normpath(restored)):
+                diffs.pop(key, None)
+        meta = last.get("file_metadata") or {}
+        meta.pop(restored, None)
+        last["text_differences"] = diffs
+        last["file_metadata"] = meta
+        last["modified_count"] = len(last.get("modified_files") or [])
+        last["deleted_count"] = len(last.get("deleted_files") or [])
+        last["new_count"] = len(last.get("new_files") or [])
+        monitor_service.last_result = last
+
+    remaining_alerts = []
+    for alert in monitor_service.get_alerts():
+        affected = alert.get("affected_files") or []
+        still_affected = [
+            item for item in affected
+            if item.get("path") != restored
+            and os.path.normcase(os.path.normpath(item.get("path") or "")) != os.path.normcase(os.path.normpath(restored))
+        ]
+        if still_affected:
+            alert = {**alert, "affected_files": still_affected}
+            remaining_alerts.append(alert)
+    monitor_service._pending_alerts = remaining_alerts
+
+    save_log(f"[RESTORED] {restored} (baseline refreshed, not treated as a new change)")
+    return {**result, "last_result": monitor_service.last_result}
 
 
 @app.post("/api/select-folder")
@@ -528,7 +564,9 @@ def api_get_reports():
 
 @app.get("/api/reports/{filename}/preview")
 def api_preview_report(filename: str):
-    file_path = os.path.join("reports", filename)
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid report filename.")
+    file_path = os.path.join(REPORT_FOLDER, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Report file not found.")
     return FileResponse(file_path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'})
@@ -536,7 +574,9 @@ def api_preview_report(filename: str):
 
 @app.get("/api/reports/{filename}")
 def api_download_report(filename: str):
-    file_path = os.path.join("reports", filename)
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid report filename.")
+    file_path = os.path.join(REPORT_FOLDER, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Report file not found.")
     return FileResponse(file_path, media_type="application/pdf", filename=filename)

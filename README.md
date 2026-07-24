@@ -20,7 +20,7 @@ Runtime data (baseline, logs, reports) is stored at the repository root.
 ### 1. Install dependencies (one time)
 
 ```bash
-# From the project root — installs Node + Python dependencies
+# From the project root: installs Node + Python dependencies
 npm run install:all
 ```
 
@@ -38,7 +38,7 @@ npm run dev
 
 Open **http://localhost:5173**
 
-This starts **both** the Python API (port 8000) and the React UI (port 5173). Do not run only `cd frontend && npm run dev` — that starts the UI without the API.
+This starts **both** the Python API (port 8000) and the React UI (port 5173). Do not run only `cd frontend && npm run dev`. That starts the UI without the API.
 
 ### 3. Production-style (single server)
 

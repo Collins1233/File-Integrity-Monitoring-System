@@ -17,7 +17,7 @@ export default function OnboardingWizard({ open, onClose, onStart }) {
     {
       icon: Bell,
       title: 'Get notified',
-      text: 'When files change, you will see in-app alerts. Allow browser notifications for alerts outside the tab.',
+      text: 'When files change, you will see alerts in the app. Allow browser notifications for alerts outside the tab.',
     },
     {
       icon: Shield,

@@ -49,5 +49,5 @@ const sessionPath = path.join(projectRoot, '.fim-dev-session');
 fs.writeFileSync(sessionPath, sessionId, 'utf8');
 
 console.log(
-  `\n[dev] Fresh session (${sessionId.slice(0, 8)}…) — cleared ${cleared} saved item${cleared === 1 ? '' : 's'} from the last run.\n`,
+  `\n[dev] Fresh session (${sessionId.slice(0, 8)}…). Cleared ${cleared} saved item${cleared === 1 ? '' : 's'} from the last run.\n`,
 );

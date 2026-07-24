@@ -23,7 +23,7 @@ def _run_picker_script(script_name: str, timeout: int) -> str:
     return result.stdout.strip().strip("\ufeff").strip("\r")
 
 
-def _pick_folder_windows(timeout: int) -> str:
+def _pick_folder_windows_powershell(timeout: int) -> str:
     ps_script = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
@@ -53,7 +53,7 @@ def _pick_folder_windows(timeout: int) -> str:
     return ""
 
 
-def _pick_files_windows(timeout: int) -> list[str]:
+def _pick_files_windows_powershell(timeout: int) -> list[str]:
     ps_script = (
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$d = New-Object System.Windows.Forms.OpenFileDialog; "
@@ -102,14 +102,16 @@ def pick_folder(timeout: int = 120) -> str:
         return result.stdout.strip()
 
     if os_name == "Windows":
+        # Prefer tkinter: PowerShell FolderBrowserDialog often hangs invisible
+        # under uvicorn/Node for the full timeout (~2 minutes) before failing.
         try:
-            folder_path = _pick_folder_windows(timeout)
+            folder_path = _run_picker_script("win_folder_picker.py", timeout)
             if folder_path:
                 return folder_path
         except Exception:
             pass
         try:
-            return _run_picker_script("win_folder_picker.py", timeout)
+            return _pick_folder_windows_powershell(min(timeout, 20))
         except Exception:
             return ""
 
@@ -161,14 +163,14 @@ def pick_files(timeout: int = 120) -> list[str]:
 
     if os_name == "Windows":
         try:
-            file_paths = _pick_files_windows(timeout)
+            output = _run_picker_script("win_file_picker.py", timeout)
+            file_paths = [line.strip() for line in output.splitlines() if line.strip()]
             if file_paths:
                 return file_paths
         except Exception:
             pass
         try:
-            output = _run_picker_script("win_file_picker.py", timeout)
-            return [line.strip() for line in output.splitlines() if line.strip()]
+            return _pick_files_windows_powershell(min(timeout, 20))
         except Exception:
             return []
 

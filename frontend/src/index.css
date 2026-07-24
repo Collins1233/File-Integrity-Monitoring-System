@@ -1261,7 +1261,7 @@ body::after {
   color: var(--text-secondary);
 }
 
-/* File change viewer — clear before/after for every file type */
+/* File change viewer: clear before/after for every file type */
 .fc-list {
   display: flex;
   flex-direction: column;
