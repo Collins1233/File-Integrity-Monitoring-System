@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 
 import FileChangeViewer from './FileChangeViewer';
+import BootSequence, { shouldShowBoot } from './BootSequence';
 import FileDocumentPreview from './FileDocumentPreview';
 import ToastNotification from './ToastNotification';
 import MonitoredFilesPanel from './MonitoredFilesPanel';
@@ -144,6 +145,7 @@ function App() {
   const [serverOnline, setServerOnline] = useState(true);
   const [scanProgress, setScanProgress] = useState({ active: false, percent: 0, current_file: '' });
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fim_dark_mode') === 'true');
+  const [showBoot, setShowBoot] = useState(() => shouldShowBoot());
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('fim_onboarding_done'));
   const [previewReport, setPreviewReport] = useState(null);
   const [notificationPermission, setNotificationPermission] = useState(
@@ -735,6 +737,32 @@ function App() {
     }
   };
 
+  const handleDownloadReport = async (filename) => {
+    try {
+      addConsoleLog(`Preparing download: ${filename}`, 'info');
+      const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        addConsoleLog(`Could not download report: ${data.detail || res.statusText}`, 'danger');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Delay revoke so Chrome/Edge finish writing the file.
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      addConsoleLog(`Downloaded report: ${filename}`, 'success');
+    } catch (err) {
+      addConsoleLog(`Download failed: ${err.message}. Try Preview, then save from the PDF viewer.`, 'danger');
+    }
+  };
+
   const formatCheckTime = (value) => {
     if (!value) return 'Not yet';
     const date = new Date(value.replace(' ', 'T'));
@@ -744,9 +772,10 @@ function App() {
 
   return (
     <div className="app-shell">
+      <BootSequence open={showBoot} onComplete={() => setShowBoot(false)} />
       <VersionGate />
       <OnboardingWizard
-        open={showOnboarding}
+        open={!showBoot && showOnboarding}
         onClose={() => {
           localStorage.setItem('fim_onboarding_done', 'true');
           setShowOnboarding(false);
@@ -1285,6 +1314,7 @@ function App() {
             <h3 className="card-title"><FileText size={18} /> Available PDF Reports</h3>
             <p className="text-secondary" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
               Only the 5 most recent reports are kept. Older reports are removed automatically.
+              If a download manager blocks saving, use Preview and save from the PDF viewer instead.
             </p>
             {reports.length === 0 ? (
               <p className="text-muted">No integrity check reports found.</p>
@@ -1314,15 +1344,14 @@ function App() {
                           >
                             <Eye size={14} /> Preview
                           </button>
-                          <a 
-                            href={`${API_BASE}/api/reports/${report.filename}`} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="btn btn-secondary" 
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => handleDownloadReport(report.filename)}
                             style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                           >
                             <Download size={14} /> Download
-                          </a>
+                          </button>
                           <button
                             type="button"
                             className="btn btn-danger"

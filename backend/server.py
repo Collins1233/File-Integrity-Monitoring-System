@@ -579,7 +579,17 @@ def api_download_report(filename: str):
     file_path = os.path.join(REPORT_FOLDER, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Report file not found.")
-    return FileResponse(file_path, media_type="application/pdf", filename=filename)
+    # Explicit attachment so browsers save the PDF instead of handing the URL to download managers.
+    return FileResponse(
+        file_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.delete("/api/reports/{filename}")
