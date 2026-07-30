@@ -129,11 +129,13 @@ def _display_path_for_files(file_paths: list[str]) -> str:
         return "Selected files"
 
     parents = {os.path.dirname(os.path.abspath(path)) for path in file_paths}
+    count = len(file_paths)
+    label = "file" if count == 1 else "files"
     if len(parents) == 1:
         parent = next(iter(parents))
-        return f"{parent} ({len(file_paths)} files)"
+        return f"{parent} ({count} {label})"
 
-    return f"Custom selection ({len(file_paths)} files)"
+    return f"Custom selection ({count} {label})"
 
 
 def _backup_supported_files(files: dict, folder_path: str, monitor_id: str | None = None, monitor_type: str = "folder") -> None:
@@ -201,9 +203,37 @@ def add_files_monitor(file_paths: list[str], set_active: bool = True) -> dict:
         raise ValueError("No valid files were provided.")
 
     normalized_paths = sorted(set(normalized_paths))
+    store = load_store()
+
+    # Prefer merging into the active files monitor so "add one by one" grows one target.
+    files_monitors = [m for m in store["monitors"] if m.get("monitor_type") == "files"]
+    active_id = store.get("active_monitor_id")
+    merge_target = next((m for m in files_monitors if m["id"] == active_id), None)
+    if merge_target is None and files_monitors:
+        merge_target = files_monitors[0]
+
+    if merge_target:
+        combined_paths = sorted(set(merge_target.get("watch_paths") or []) | set(normalized_paths))
+        files = scan_files_with_options(combined_paths)
+        display_path = _display_path_for_files(combined_paths)
+        _backup_supported_files(
+            files,
+            display_path,
+            monitor_id=merge_target["id"],
+            monitor_type="files",
+        )
+        merge_target["watch_paths"] = combined_paths
+        merge_target["files"] = files
+        merge_target["folder_path"] = display_path
+        merge_target["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if set_active:
+            store["active_monitor_id"] = merge_target["id"]
+        _save_store(store)
+        merge_target["is_new_monitor"] = False
+        return merge_target
+
     files = scan_files_with_options(normalized_paths)
     display_path = _display_path_for_files(normalized_paths)
-
     monitor_id = str(uuid.uuid4())[:8]
     monitor = {
         "id": monitor_id,
@@ -213,31 +243,23 @@ def add_files_monitor(file_paths: list[str], set_active: bool = True) -> dict:
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "files": files,
     }
-
     _backup_supported_files(files, display_path, monitor_id=monitor_id, monitor_type="files")
-
-    store = load_store()
-    existing = next(
-        (
-            m for m in store["monitors"]
-            if m.get("monitor_type") == "files" and sorted(m.get("watch_paths", [])) == normalized_paths
-        ),
-        None,
-    )
-    if existing:
-        existing["files"] = files
-        existing["created_at"] = monitor["created_at"]
-        existing["folder_path"] = display_path
-        if set_active:
-            store["active_monitor_id"] = existing["id"]
-        _save_store(store)
-        return existing
 
     store["monitors"].append(monitor)
     if set_active or not store.get("active_monitor_id"):
         store["active_monitor_id"] = monitor_id
     _save_store(store)
+    monitor["is_new_monitor"] = True
     return monitor
+
+
+def count_unique_monitored_files(monitors: list[dict] | None = None) -> int:
+    source = monitors if monitors is not None else load_store().get("monitors", [])
+    unique_paths = set()
+    for monitor in source:
+        for path in monitor.get("files", {}).keys():
+            unique_paths.add(os.path.normcase(os.path.normpath(path)))
+    return len(unique_paths)
 
 
 def accept_monitor_changes(monitor_id: str | None = None) -> dict:

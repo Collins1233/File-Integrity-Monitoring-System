@@ -25,6 +25,7 @@ from baseline_store import (
     remove_monitor,
     accept_monitor_changes,
     restore_file,
+    count_unique_monitored_files,
     legacy_load_baseline as load_baseline,
     normalize_folder_path,
 )
@@ -115,7 +116,8 @@ def _status_payload():
         "has_baseline": len(monitors) > 0,
         "folder_path": active["folder_path"] if active else "",
         "created_at": active["created_at"] if active else "",
-        "file_count": len(active["files"]) if active else 0,
+        "file_count": count_unique_monitored_files(monitors),
+        "active_file_count": len(active["files"]) if active else 0,
         "monitor_count": len(monitors),
         "active_monitor_id": active["id"] if active else None,
         "monitors": [
@@ -161,9 +163,11 @@ def create_baseline_for_folder(folder_path: str) -> dict:
 
 def create_baseline_for_files(file_paths: list[str]) -> dict:
     monitor = add_files_monitor(file_paths, set_active=True)
+    is_new = monitor.pop("is_new_monitor", True)
     return {
         "success": True,
         "baseline_created": True,
+        "is_new_monitor": is_new,
         "monitor_id": monitor["id"],
         "monitor_type": monitor.get("monitor_type", "files"),
         "folder_path": monitor["folder_path"],

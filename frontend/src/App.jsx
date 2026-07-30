@@ -492,7 +492,11 @@ function App() {
       const res = await fetch(`${API_BASE}/api/select-files`, { method: 'POST' });
       const data = await res.json();
       if (data.success && data.baseline_created) {
-        addConsoleLog(`Files added: ${data.file_count} selected`, 'success');
+        const action = data.is_new_monitor === false ? 'updated' : 'added';
+        addConsoleLog(
+          `Files ${action}: ${data.file_count} file${data.file_count === 1 ? '' : 's'} in this selection`,
+          'success'
+        );
         addConsoleLog(data.folder_path, 'info');
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
@@ -1027,7 +1031,9 @@ function App() {
                                 {monitor.monitor_type === 'files' ? 'Files' : 'Folder'}
                               </span>
                               <span className="monitor-list-path">{monitor.folder_path}</span>
-                              <span className="monitor-list-meta">{monitor.file_count} files</span>
+                              <span className="monitor-list-meta">
+                                {monitor.file_count} file{monitor.file_count === 1 ? '' : 's'}
+                              </span>
                             </div>
                           </button>
                           <button
