@@ -45,7 +45,7 @@ import {
 
 import { API_BASE, resolveApiBase, isNetworkError, API_CONNECTION_HELP } from './api';
 
-const APP_ICON = `${window.location.origin}/favicon.svg`;
+const APP_ICON = `${window.location.origin}/fim-logo.png`;
 
 function sanitizeFolderPath(rawPath) {
   return rawPath

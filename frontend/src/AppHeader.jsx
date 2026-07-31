@@ -4,9 +4,10 @@ import {
   BellOff,
   HelpCircle,
   Moon,
-  Shield,
   Sun,
 } from 'lucide-react';
+
+const APP_LOGO = '/fim-logo.png';
 
 export default function AppHeader({
   pageTitle,
@@ -32,8 +33,8 @@ export default function AppHeader({
     <header className="top-bar shell-chrome">
       <div className="top-bar-left">
         <div className="top-bar-brand">
-          <Shield size={20} className="top-bar-logo" />
-          <span className="top-bar-app-name">FIM</span>
+          <img src={APP_LOGO} alt="" className="top-bar-logo" width={28} height={28} />
+          <span className="top-bar-app-name">FIMS</span>
         </div>
         <div className="top-bar-divider" />
         <h1 className="top-bar-page-title">{pageTitle}</h1>

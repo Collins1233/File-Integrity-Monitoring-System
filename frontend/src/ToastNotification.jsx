@@ -36,7 +36,7 @@ export default function ToastNotification({
         <div className="toast-brand">
           <img src={appIcon} alt="" className="toast-app-icon" />
           <div className="toast-brand-text">
-            <span className="toast-app-name">FIM Dashboard</span>
+            <span className="toast-app-name">FIMS</span>
             <span className="toast-page-name">{pageName}</span>
           </div>
         </div>

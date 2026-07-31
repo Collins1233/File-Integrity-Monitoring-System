@@ -104,7 +104,7 @@ function TourScene({ scene }) {
   if (scene === 'welcome') {
     return (
       <div className="tour-scene tour-scene-welcome">
-        <Shield size={64} strokeWidth={1.4} />
+        <img src="/fim-logo.png" alt="" className="tour-scene-logo" width={88} height={88} />
         <div className="tour-scene-rings" />
       </div>
     );

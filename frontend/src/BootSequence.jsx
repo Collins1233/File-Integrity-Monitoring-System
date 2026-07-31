@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield } from 'lucide-react';
 
 const BOOT_SESSION_KEY = 'fim_boot_complete';
+const APP_LOGO = '/fim-logo.png';
 
 const FILE_STEPS = [
   { name: 'config.json', label: 'config.json' },
@@ -111,13 +111,13 @@ export default function BootSequence({ open, onComplete }) {
         {phase === 'start' && (
           <section className="boot-screen boot-screen-active">
             <div className="boot-glass">
-              <div className="boot-seal" aria-hidden="true">
-                <div className="boot-seal-ring" />
-                <div className="boot-seal-ring-2" />
-                <div className="boot-seal-core">
-                  <Shield size={30} strokeWidth={1.8} />
-                </div>
-              </div>
+              <img
+                src={APP_LOGO}
+                alt="File Integrity Monitoring System"
+                className="boot-hero-logo"
+                width={120}
+                height={120}
+              />
               <h1 className="boot-title">File Integrity Monitoring System</h1>
               <p className="boot-subtitle">
                 Build a trusted baseline, then catch every change before it becomes a problem.
@@ -132,6 +132,13 @@ export default function BootSequence({ open, onComplete }) {
         {phase === 'brand' && (
           <section className="boot-screen boot-screen-active">
             <div className="boot-glass">
+              <img
+                src={APP_LOGO}
+                alt=""
+                className="boot-brand-logo"
+                width={72}
+                height={72}
+              />
               <div className="boot-tag">Establishing identity</div>
               <div className={`boot-split-brand ${brandPlay ? 'play' : ''}`}>
                 <div><span>File Integrity</span></div>
