@@ -36,7 +36,7 @@ from report import list_reports, delete_report_file, prune_old_reports
 from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
-from config import APP_VERSION, DEV_SESSION_FILE, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, REPORT_FOLDER, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
+from config import APP_VERSION, DEV_SESSION_FILE, FRONTEND_DIST, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, REPORT_FOLDER, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
 from native_picker import pick_files, pick_folder
 from textdiff import read_text_file
 from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
@@ -660,11 +660,10 @@ def api_export_logs(format: str = Query("json", pattern="^(json|csv)$")):
     )
 
 
-frontend_dist = os.path.join(PROJECT_ROOT, "frontend", "dist")
-if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+if os.path.isdir(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="static")
 else:
-    logger.warning("Frontend build directory ('frontend/dist') not found. Serving API only.")
+    logger.warning("Frontend build directory (%s) not found. Serving API only.", FRONTEND_DIST)
 
 if __name__ == "__main__":
     import uvicorn

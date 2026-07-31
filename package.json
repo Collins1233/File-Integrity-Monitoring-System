@@ -16,6 +16,7 @@
     "start:api": "node scripts/start-api.js",
     "lint": "npm run lint --prefix frontend",
     "install:all": "npm install && npm install --prefix frontend && npm run setup:python",
+    "build:windows": "echo Run scripts/build-windows.ps1 on a Windows machine, or trigger the Build Windows EXE GitHub Action.",
     "postinstall": "node -e \"console.log('\\nFIM setup: run npm run install:all once, then npm run dev\\n')\""
   },
   "devDependencies": {

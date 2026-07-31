@@ -10,7 +10,49 @@ import sys
 from config import BACKEND_ROOT
 
 
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _pick_folder_tk() -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    root.update_idletasks()
+    folder = filedialog.askdirectory(title="Select Directory to Monitor", mustexist=True)
+    root.destroy()
+    return folder or ""
+
+
+def _pick_files_tk() -> list[str]:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+    root.update_idletasks()
+    files = filedialog.askopenfilenames(title="Select Files to Monitor")
+    root.destroy()
+    return [path for path in files if path]
+
+
 def _run_picker_script(script_name: str, timeout: int) -> str:
+    # Frozen builds must not re-launch the .exe via sys.executable.
+    if _is_frozen():
+        if "folder" in script_name:
+            return _pick_folder_tk()
+        return "\n".join(_pick_files_tk())
+
     script_path = os.path.join(BACKEND_ROOT, script_name)
     result = subprocess.run(
         [sys.executable, script_path],

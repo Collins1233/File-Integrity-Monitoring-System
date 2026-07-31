@@ -1,0 +1,95 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm run install:all
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements-build.txt
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Create app icon
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          src = Path("frontend/public/fim-logo.png")
+          dst = Path("frontend/public/fim-logo.ico")
+          img = Image.open(src).convert("RGBA")
+          img.save(dst, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+          print("wrote", dst)
+          PY
+
+      - name: Build EXE with PyInstaller
+        run: python -m PyInstaller --noconfirm --clean FIMS.spec
+
+      - name: Stage release zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item dist\FIMS.exe release\FIMS.exe
+          @"
+          File Integrity Monitoring System (FIMS)
+
+          1. Double-click FIMS.exe
+          2. Your browser opens to http://127.0.0.1:8000
+          3. Keep FIMS.exe running while you use the dashboard
+          4. Baselines, logs, and reports are saved next to this .exe
+
+          If the app fails to start, check fim_startup_error.txt in this folder.
+          "@.Trim() | Set-Content -Encoding utf8 release\README.txt
+          Compress-Archive -Path release\FIMS.exe,release\README.txt -DestinationPath FIMS-windows.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FIMS-windows
+          path: |
+            dist/FIMS.exe
+            FIMS-windows.zip
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/FIMS.exe
+            FIMS-windows.zip
+          generate_release_notes: true
+          body: |
+            ## Windows download
+
+            - **FIMS.exe** — double-click to start
+            - **FIMS-windows.zip** — exe + short readme
+
+            Keep the app running while you use the dashboard. Data files are stored next to the executable.

@@ -12,11 +12,14 @@ venv/
 # Build folders
 build/
 dist/
+release/
 node_modules/
+*.spec.bak
 
 # Generated files
 baseline.json
 fim_log.txt
+fim_startup_error.txt
 .fim-dev-session
 settings.json
 
@@ -25,3 +28,4 @@ reports/
 
 # Windows
 Thumbs.db
+frontend/public/fim-logo.ico

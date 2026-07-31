@@ -5,9 +5,25 @@ FILE INTEGRITY MONITORING SYSTEM CONFIGURATION
 """
 
 import os
+import sys
 
-BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
+
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+# Writable data lives next to the .exe when packaged; otherwise at the repo root.
+# Bundled read-only assets (UI build, picker helpers) live in RESOURCE_ROOT.
+if _is_frozen():
+    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
+    RESOURCE_ROOT = getattr(sys, "_MEIPASS", PROJECT_ROOT)
+    BACKEND_ROOT = os.path.join(RESOURCE_ROOT, "backend")
+else:
+    BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
+    RESOURCE_ROOT = PROJECT_ROOT
+
+FRONTEND_DIST = os.path.join(RESOURCE_ROOT, "frontend", "dist")
 
 APP_NAME = "File Integrity Monitoring System"
 APP_VERSION = "2.0.0"
