@@ -53,22 +53,51 @@ jobs:
       - name: Build EXE with PyInstaller
         run: python -m PyInstaller --noconfirm --clean FIMS.spec
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (Desktop + Start Menu)
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after Inno Setup install" }
+          & $iscc installer\FIMS.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
+          if (-not (Test-Path dist\FIMS-Setup.exe)) { throw "FIMS-Setup.exe missing" }
+
       - name: Stage release zip
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item dist\FIMS.exe release\FIMS.exe
+          Copy-Item dist\FIMS-Setup.exe release\FIMS-Setup.exe
           @"
           File Integrity Monitoring System (FIMS)
 
-          1. Double-click FIMS.exe
-          2. Your browser opens to http://127.0.0.1:8000
-          3. Keep FIMS.exe running while you use the dashboard
-          4. Baselines, logs, and reports are saved next to this .exe
+          Recommended:
+            Run FIMS-Setup.exe
+            - Installs FIMS
+            - Creates Start Menu shortcut
+            - Optional Desktop icon
+            - Adds Uninstall entry
 
-          If the app fails to start, check fim_startup_error.txt in this folder.
+          Portable:
+            Double-click FIMS.exe (no install)
+
+          Dashboard: http://127.0.0.1:8000
+          Keep the app running while you use the dashboard.
+
+          User data (baselines, logs, reports):
+            %LOCALAPPDATA%\FIMS
+
+          If startup fails, check fim_startup_error.txt next to the .exe
+          or in the install folder.
           "@.Trim() | Set-Content -Encoding utf8 release\README.txt
-          Compress-Archive -Path release\FIMS.exe,release\README.txt -DestinationPath FIMS-windows.zip -Force
+          Compress-Archive -Path release\FIMS.exe,release\FIMS-Setup.exe,release\README.txt -DestinationPath FIMS-windows.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -76,6 +105,7 @@ jobs:
           name: FIMS-windows
           path: |
             dist/FIMS.exe
+            dist/FIMS-Setup.exe
             FIMS-windows.zip
 
       - name: Publish GitHub Release
@@ -84,12 +114,15 @@ jobs:
         with:
           files: |
             dist/FIMS.exe
+            dist/FIMS-Setup.exe
             FIMS-windows.zip
           generate_release_notes: true
           body: |
             ## Windows download
 
-            - **FIMS.exe** — double-click to start
-            - **FIMS-windows.zip** — exe + short readme
+            - **FIMS-Setup.exe** — recommended. Installs FIMS, Start Menu shortcut, optional Desktop icon
+            - **FIMS.exe** — portable (no install)
+            - **FIMS-windows.zip** — both + readme
 
-            Keep the app running while you use the dashboard. Data files are stored next to the executable.
+            After install, launch **FIMS** from the Start Menu or Desktop.
+            User data is stored in `%LOCALAPPDATA%\FIMS`.

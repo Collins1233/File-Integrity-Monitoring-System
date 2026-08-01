@@ -39,7 +39,34 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $Exe = Join-Path $Root "dist\FIMS.exe"
 if (-not (Test-Path $Exe)) { throw "Expected output missing: $Exe" }
 
+Write-Host "==> Building installer (Inno Setup)"
+$iscc = @(
+  "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+  "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $iscc) {
+  Write-Host "Inno Setup not found. Installing via Chocolatey..."
+  choco install innosetup -y --no-progress
+  $iscc = @(
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+if (-not $iscc) {
+  throw "ISCC.exe not found. Install Inno Setup 6 from https://jrsoftware.org/isinfo.php"
+}
+
+& $iscc (Join-Path $Root "installer\FIMS.iss")
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
+
+$Setup = Join-Path $Root "dist\FIMS-Setup.exe"
+if (-not (Test-Path $Setup)) { throw "Expected output missing: $Setup" }
+
 Write-Host ""
-Write-Host "Build complete: $Exe"
-Write-Host "Double-click FIMS.exe to open the dashboard in your browser."
-Write-Host "Baselines, logs, and reports are stored next to the .exe."
+Write-Host "Build complete:"
+Write-Host "  Portable : $Exe"
+Write-Host "  Installer: $Setup"
+Write-Host "Run FIMS-Setup.exe for Start Menu + optional Desktop icon."
+Write-Host "User data is stored in %LOCALAPPDATA%\FIMS"

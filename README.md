@@ -4,14 +4,20 @@ Python API + React dashboard for monitoring file integrity across folders and se
 
 ## Download for Windows (.exe)
 
-Windows users can run FIMS without installing Node or Python:
+Windows users can run FIMS without installing Node or Python.
 
-1. Open the repo **[Releases](https://github.com/Collins1233/File-Integrity-Monitoring-System/releases)** page
-2. Download **FIMS.exe** or **FIMS-windows.zip**
-3. Double-click **FIMS.exe** — the dashboard opens in your browser at `http://127.0.0.1:8000`
-4. Leave FIMS.exe running while you use the app
+### Recommended: installer
 
-Baselines, logs, and reports are saved **next to the .exe**.
+1. Open **[Releases](https://github.com/Collins1233/File-Integrity-Monitoring-System/releases)** (or download the Actions artifact)
+2. Run **FIMS-Setup.exe**
+3. Choose optional **Desktop icon** (Start Menu shortcut is always added)
+4. Launch **FIMS** — the dashboard opens at `http://127.0.0.1:8000`
+
+### Portable
+
+Download **FIMS.exe** and double-click it (no install, no shortcuts).
+
+Keep the app running while you use the dashboard. User data (baselines, logs, reports) is stored in `%LOCALAPPDATA%\FIMS`.
 
 ### Publish a new Windows build
 
@@ -30,7 +36,10 @@ git push origin v2.0.1
 powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
-Output: `dist\FIMS.exe`
+Outputs:
+
+- `dist\FIMS.exe` — portable
+- `dist\FIMS-Setup.exe` — installer with Start Menu + optional Desktop icon
 
 ## Project layout
 
@@ -40,11 +49,12 @@ File-Integrity-Monitoring-System/
 ├── frontend/         # React + Vite UI
 ├── demo_files/       # Sample data for testing
 ├── FIMS.spec         # PyInstaller Windows packaging
+├── installer/        # Inno Setup script (FIMS-Setup.exe)
 ├── package.json      # Root dev scripts (run from here)
 └── README.md
 ```
 
-Runtime data (baseline, logs, reports) is stored at the repository root (or next to the .exe when packaged).
+Runtime data (baseline, logs, reports) is stored at the repository root in development, or in `%LOCALAPPDATA%\FIMS` for the packaged Windows app.
 
 ## Quick start (developers)
 
@@ -90,7 +100,7 @@ Open **http://127.0.0.1:8000**
 | `npm run dev:api` | Backend only (port 8000) |
 | `npm run build` | Build frontend to `frontend/dist` |
 | `npm start` | Build + run production server |
-| `scripts/build-windows.ps1` | Build `dist\FIMS.exe` on Windows |
+| `scripts/build-windows.ps1` | Build `FIMS.exe` + `FIMS-Setup.exe` on Windows |
 
 ## Requirements
 

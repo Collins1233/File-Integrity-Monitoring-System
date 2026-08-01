@@ -12,12 +12,15 @@ def _is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-# Writable data lives next to the .exe when packaged; otherwise at the repo root.
 # Bundled read-only assets (UI build, picker helpers) live in RESOURCE_ROOT.
+# Writable data for packaged apps lives in %LOCALAPPDATA%\FIMS so installers
+# can place the .exe under Program Files / LocalAppData\Programs safely.
 if _is_frozen():
-    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
-    RESOURCE_ROOT = getattr(sys, "_MEIPASS", PROJECT_ROOT)
+    RESOURCE_ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
     BACKEND_ROOT = os.path.join(RESOURCE_ROOT, "backend")
+    local_app_data = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    PROJECT_ROOT = os.path.join(local_app_data, "FIMS")
+    os.makedirs(PROJECT_ROOT, exist_ok=True)
 else:
     BACKEND_ROOT = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(BACKEND_ROOT)
