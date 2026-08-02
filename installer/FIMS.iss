@@ -4,7 +4,7 @@
 
 #define MyAppName "File Integrity Monitoring System"
 #define MyAppShortName "FIMS"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "FIMS"
 #define MyAppURL "https://github.com/Collins1233/File-Integrity-Monitoring-System"
 #define MyAppExeName "FIMS.exe"

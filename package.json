@@ -1,7 +1,7 @@
 {
   "name": "file-integrity-monitoring-system",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "File Integrity Monitoring System: React frontend + Python API",
   "scripts": {
     "predev": "node scripts/free-dev-ports.js && node scripts/reset-dev-state.js && node scripts/setup-check.js",

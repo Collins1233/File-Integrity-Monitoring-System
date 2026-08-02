@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FIMS — Diff viewer polish preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef2f0;
+      --card: #ffffff;
+      --ink: #142033;
+      --muted: #5b6b7c;
+      --line: #d7e0da;
+      --navy: #1b2e50;
+      --teal: #5f8a7d;
+      --add: #d8f3e4;
+      --add-ink: #146c43;
+      --del: #fde2e1;
+      --del-ink: #b42318;
+      --chg: #fff3cd;
+      --chg-ink: #8a6d00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(900px 420px at 10% -10%, rgba(95, 138, 125, 0.18), transparent 60%),
+        radial-gradient(700px 380px at 100% 0%, rgba(27, 46, 80, 0.12), transparent 55%),
+        var(--bg);
+      min-height: 100vh;
+      padding: 28px 20px 48px;
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 10px;
+    }
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: clamp(1.7rem, 3vw, 2.3rem);
+      margin: 0 0 8px;
+      color: var(--navy);
+    }
+    .lead { color: var(--muted); margin: 0 0 28px; max-width: 54ch; }
+    .grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1.1fr 0.9fr;
+    }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 18px 40px rgba(20, 32, 51, 0.06);
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fbfcfb, #f4f7f5);
+    }
+    .file-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .file-name { font-weight: 700; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-sub { color: var(--muted); font-size: 0.85rem; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .chip.word { background: #e8eefc; color: #274690; }
+    .chip.add { background: var(--add); color: var(--add-ink); }
+    .chip.del { background: var(--del); color: var(--del-ink); }
+    .chip.chg { background: var(--chg); color: var(--chg-ink); }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 10px 12px 0;
+      border-bottom: 1px solid var(--line);
+      background: #fafbfa;
+    }
+    .tab {
+      border: 0;
+      background: transparent;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 600;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      cursor: default;
+    }
+    .tab.active { color: var(--navy); border-bottom-color: var(--teal); }
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      min-height: 360px;
+    }
+    .side { display: flex; flex-direction: column; min-width: 0; }
+    .side + .side { border-left: 1px solid var(--line); }
+    .side-label {
+      padding: 10px 14px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: #f7f9f8;
+      border-bottom: 1px solid var(--line);
+    }
+    .doc {
+      padding: 18px 18px 24px;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+    .para { margin: 0 0 12px; }
+    .mark-del {
+      background: var(--del);
+      color: var(--del-ink);
+      text-decoration: line-through;
+      border-radius: 3px;
+      padding: 0 3px;
+    }
+    .mark-add {
+      background: var(--add);
+      color: var(--add-ink);
+      border-radius: 3px;
+      padding: 0 3px;
+    }
+    .mark-chg {
+      background: var(--chg);
+      color: var(--chg-ink);
+      border-radius: 3px;
+      padding: 0 3px;
+    }
+    .heading {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.15rem;
+      margin: 0 0 14px;
+      color: var(--navy);
+    }
+    .pdf-page {
+      margin: 10px auto;
+      width: min(100%, 280px);
+      aspect-ratio: 8.5 / 11;
+      background: white;
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 24px rgba(20,32,51,0.08);
+      padding: 18px 16px;
+      position: relative;
+    }
+    .pdf-page .badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 3px 7px;
+      border-radius: 999px;
+    }
+    .stack { display: grid; gap: 18px; }
+    .mini {
+      padding: 16px;
+    }
+    .mini h3 {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      color: var(--navy);
+    }
+    .mini p { margin: 0 0 12px; color: var(--muted); font-size: 0.86rem; }
+    .sheet {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      font-size: 0.8rem;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { background: #f3f6f4; color: var(--muted); font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    td.changed { background: var(--chg); color: var(--chg-ink); font-weight: 700; }
+    td.added { background: var(--add); color: var(--add-ink); font-weight: 700; }
+    .note {
+      margin-top: 22px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: rgba(27, 46, 80, 0.06);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .note strong { color: var(--navy); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="eyebrow">Preview · not live in the app yet</div>
+    <h1>Richer Office &amp; PDF compare</h1>
+    <p class="lead">
+      Side-by-side document pages, word-level highlights, spreadsheet cell markers,
+      and clear change chips — so reviewers see <em>what</em> changed, not only that a hash moved.
+    </p>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="file-meta">
+            <div class="file-name">Policy_Handbook.docx</div>
+            <div class="file-sub">Word · page 2 of 4 · compared to baseline</div>
+          </div>
+          <div class="chips">
+            <span class="chip word">Word</span>
+            <span class="chip del">−12 words</span>
+            <span class="chip add">+18 words</span>
+            <span class="chip chg">1 heading</span>
+          </div>
+        </div>
+        <div class="tabs">
+          <button class="tab active" type="button">Side by side</button>
+          <button class="tab" type="button">Inline</button>
+          <button class="tab" type="button">Pages</button>
+        </div>
+        <div class="compare">
+          <div class="side">
+            <div class="side-label">Baseline</div>
+            <div class="doc">
+              <div class="heading">2. Access control</div>
+              <p class="para">Employees must use company devices for all production work.</p>
+              <p class="para">
+                Passwords must be rotated
+                <span class="mark-del">every 30 days</span>
+                and stored only in the approved vault.
+              </p>
+              <p class="para">Remote access requires manager approval.</p>
+            </div>
+          </div>
+          <div class="side">
+            <div class="side-label">Current</div>
+            <div class="doc">
+              <div class="heading">2. Access control <span class="mark-chg">policy</span></div>
+              <p class="para">Employees must use company devices for all production work.</p>
+              <p class="para">
+                Passwords must be rotated
+                <span class="mark-add">every 90 days</span>
+                and stored only in the approved vault.
+              </p>
+              <p class="para">Remote access requires manager approval.</p>
+              <p class="para"><span class="mark-add">MFA is mandatory for all admin accounts.</span></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="stack">
+        <section class="panel mini">
+          <h3>PDF page flip</h3>
+          <p>See the exact page that changed, with badges for added / removed content blocks.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="pdf-page">
+              <span class="badge" style="background:var(--del);color:var(--del-ink);">− block</span>
+              <div style="height:10px;background:#e8edf2;margin-bottom:8px;border-radius:3px;"></div>
+              <div style="height:8px;width:80%;background:#e8edf2;margin-bottom:8px;border-radius:3px;"></div>
+              <div style="height:48px;background:var(--del);border-radius:4px;margin-bottom:8px;"></div>
+              <div style="height:8px;width:70%;background:#e8edf2;border-radius:3px;"></div>
+            </div>
+            <div class="pdf-page">
+              <span class="badge" style="background:var(--add);color:var(--add-ink);">+ block</span>
+              <div style="height:10px;background:#e8edf2;margin-bottom:8px;border-radius:3px;"></div>
+              <div style="height:8px;width:80%;background:#e8edf2;margin-bottom:8px;border-radius:3px;"></div>
+              <div style="height:48px;background:var(--add);border-radius:4px;margin-bottom:8px;"></div>
+              <div style="height:8px;width:90%;background:#e8edf2;border-radius:3px;"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel mini">
+          <h3>Excel cell map</h3>
+          <p>Changed cells glow in place — no raw hash dump.</p>
+          <div class="sheet">
+            <table>
+              <thead>
+                <tr><th>Item</th><th>Q1</th><th>Q2</th><th>Owner</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Servers</td><td>12</td><td class="changed">14</td><td>Ops</td></tr>
+                <tr><td>Laptops</td><td>40</td><td>40</td><td>IT</td></tr>
+                <tr><td class="added">Cameras</td><td class="added">—</td><td class="added">6</td><td class="added">Sec</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <p class="note">
+      <strong>This is a design preview only.</strong>
+      Building it for real is about difficulty <strong>5/10</strong> —
+      mostly UI + richer parse output for DOCX/PDF/XLSX diffs you already detect.
+    </p>
+  </div>
+</body>
+</html>

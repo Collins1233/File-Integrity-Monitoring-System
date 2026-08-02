@@ -29,7 +29,7 @@ else:
 FRONTEND_DIST = os.path.join(RESOURCE_ROOT, "frontend", "dist")
 
 APP_NAME = "File Integrity Monitoring System"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 WINDOW_TITLE = "File Integrity Monitoring System"
 
 BASELINE_FILE = os.path.join(PROJECT_ROOT, "baseline.json")

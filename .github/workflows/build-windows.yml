@@ -69,6 +69,32 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
           if (-not (Test-Path dist\FIMS-Setup.exe)) { throw "FIMS-Setup.exe missing" }
 
+      - name: Code-sign EXE and installer
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PFX_BASE64)) {
+            Write-Host "No WINDOWS_CERT_PFX_BASE64 secret — skipping Authenticode signing."
+            Write-Host "Downloads still work; SmartScreen may show Unknown publisher until a cert is added."
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "fims-codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "signtool.exe not found" }
+          foreach ($file in @("dist\FIMS.exe", "dist\FIMS-Setup.exe")) {
+            & $signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /d "File Integrity Monitoring System" $file
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $file" }
+            & $signtool verify /pa $file
+            if ($LASTEXITCODE -ne 0) { throw "Signature verify failed for $file" }
+          }
+          Remove-Item $certPath -Force
+          Write-Host "Signed FIMS.exe and FIMS-Setup.exe"
+
       - name: Stage release zip
         shell: pwsh
         run: |
@@ -76,26 +102,25 @@ jobs:
           Copy-Item dist\FIMS.exe release\FIMS.exe
           Copy-Item dist\FIMS-Setup.exe release\FIMS-Setup.exe
           @"
-          File Integrity Monitoring System (FIMS)
+          File Integrity Monitoring System (FIMS) v2.0.1
 
           Recommended:
             Run FIMS-Setup.exe
             - Installs FIMS
             - Creates Start Menu shortcut
             - Optional Desktop icon
-            - Adds Uninstall entry
+            - System tray icon while running (Open / Quit)
 
           Portable:
             Double-click FIMS.exe (no install)
 
           Dashboard: http://127.0.0.1:8000
-          Keep the app running while you use the dashboard.
+          Look for the FIMS icon in the Windows system tray.
 
           User data (baselines, logs, reports):
             %LOCALAPPDATA%\FIMS
 
-          If startup fails, check fim_startup_error.txt next to the .exe
-          or in the install folder.
+          If startup fails, check fim_startup_error.txt in %LOCALAPPDATA%\FIMS
           "@.Trim() | Set-Content -Encoding utf8 release\README.txt
           Compress-Archive -Path release\FIMS.exe,release\FIMS-Setup.exe,release\README.txt -DestinationPath FIMS-windows.zip -Force
 
@@ -118,11 +143,17 @@ jobs:
             FIMS-windows.zip
           generate_release_notes: true
           body: |
-            ## Windows download
+            ## Windows download — v2.0.1
 
             - **FIMS-Setup.exe** — recommended. Installs FIMS, Start Menu shortcut, optional Desktop icon
             - **FIMS.exe** — portable (no install)
             - **FIMS-windows.zip** — both + readme
 
+            ### What's new
+            - System tray icon (Open Dashboard / Quit)
+            - Installer with Desktop + Start Menu shortcuts
+            - Authenticode signing when a certificate is configured
+
             After install, launch **FIMS** from the Start Menu or Desktop.
-            User data is stored in `%LOCALAPPDATA%\FIMS`.
+            While running, use the tray icon near the clock.
+            User data: `%LOCALAPPDATA%\FIMS`

@@ -17,7 +17,24 @@ Windows users can run FIMS without installing Node or Python.
 
 Download **FIMS.exe** and double-click it (no install, no shortcuts).
 
-Keep the app running while you use the dashboard. User data (baselines, logs, reports) is stored in `%LOCALAPPDATA%\FIMS`.
+Keep the app running while you use the dashboard. A **FIMS icon stays in the Windows system tray** (Open Dashboard / Quit). User data (baselines, logs, reports) is stored in `%LOCALAPPDATA%\FIMS`.
+
+### Code signing (optional, removes SmartScreen “Unknown publisher”)
+
+The build will Authenticode-sign `FIMS.exe` and `FIMS-Setup.exe` when these GitHub secrets exist:
+
+| Secret | Value |
+|--------|--------|
+| `WINDOWS_CERT_PFX_BASE64` | Base64 of your `.pfx` code-signing certificate |
+| `WINDOWS_CERT_PASSWORD` | Password for that `.pfx` |
+
+Without a certificate the download still works; Windows may show SmartScreen until reputation builds or a cert is added.
+
+Encode a PFX locally:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\cert.pfx")) | Set-Clipboard
+```
 
 ### Publish a new Windows build
 

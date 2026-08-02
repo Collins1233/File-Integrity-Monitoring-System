@@ -22,8 +22,11 @@ datas = [
     (str(BACKEND / "win_file_picker.py"), "backend"),
 ]
 
+logo_png = ROOT / "frontend" / "public" / "fim-logo.png"
+if logo_png.is_file():
+    datas.append((str(logo_png), os.path.join("frontend", "public")))
 if ICON.is_file():
-    datas.append((str(ICON), "frontend/public"))
+    datas.append((str(ICON), os.path.join("frontend", "public")))
 
 binaries = []
 hiddenimports = [
@@ -39,10 +42,12 @@ hiddenimports = [
     "uvicorn.lifespan.on",
     "multipart",
     "email.mime.text",
-    "reportlab.pdfbase.*",
+    "pystray._win32",
+    "PIL",
+    "PIL.Image",
 ]
 
-for package in ("uvicorn", "fastapi", "starlette", "anyio", "pydantic"):
+for package in ("uvicorn", "fastapi", "starlette", "anyio", "pydantic", "pystray"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_binaries
@@ -53,7 +58,7 @@ hiddenimports += collect_submodules("docx")
 hiddenimports += collect_submodules("openpyxl")
 hiddenimports += collect_submodules("pptx")
 hiddenimports += collect_submodules("pypdf")
-
+hiddenimports += collect_submodules("PIL")
 a = Analysis(
     [str(BACKEND / "desktop_main.py")],
     pathex=[str(BACKEND)],
