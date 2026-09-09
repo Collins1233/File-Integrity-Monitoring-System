@@ -43,7 +43,16 @@ import {
   getAffectedFiles,
 } from './alertUtils';
 
-import { API_BASE, resolveApiBase, isNetworkError, API_CONNECTION_HELP } from './api';
+import {
+  API_BASE,
+  resolveApiBase,
+  isNetworkError,
+  API_CONNECTION_HELP,
+  apiFetch,
+  getStoredRole,
+  setStoredRole,
+  setStoredApiKey,
+} from './api';
 
 const APP_ICON = `${window.location.origin}/fim-logo.png`;
 
@@ -145,6 +154,7 @@ function App() {
   const [serverOnline, setServerOnline] = useState(true);
   const [scanProgress, setScanProgress] = useState({ active: false, percent: 0, current_file: '' });
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('fim_dark_mode') === 'true');
+  const [currentRole, setCurrentRole] = useState(() => getStoredRole());
   const [showBoot, setShowBoot] = useState(() => shouldShowBoot());
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('fim_onboarding_done'));
   const [previewReport, setPreviewReport] = useState(null);
@@ -154,6 +164,21 @@ function App() {
   const seenAlertIds = useRef(new Set());
   const devSessionRef = useRef(sessionStorage.getItem(DEV_SESSION_KEY) || '');
   const healthFailures = useRef(0);
+
+  const handleRoleChange = (newRole) => {
+    setStoredRole(newRole);
+    setCurrentRole(newRole);
+    if (newRole === 'viewer') {
+      setStoredApiKey('fim_viewer_demo');
+    } else if (newRole === 'analyst') {
+      setStoredApiKey('fim_analyst_demo');
+    } else if (newRole === 'auditor') {
+      setStoredApiKey('fim_auditor_demo');
+    } else {
+      setStoredApiKey('');
+    }
+    window.location.reload();
+  };
   const busyRef = useRef(false);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
@@ -215,7 +240,7 @@ function App() {
   const dismissToast = async (alertId) => {
     setToasts(prev => prev.filter(t => t.id !== alertId));
     try {
-      await fetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
+      await apiFetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ alert_ids: [alertId] }),
@@ -227,7 +252,7 @@ function App() {
 
   const fetchMonitoring = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/monitoring/status`);
+      const res = await apiFetch(`${API_BASE}/api/monitoring/status`);
       if (!res.ok) throw new Error('offline');
       markServerOnline();
       const data = await res.json();
@@ -239,7 +264,7 @@ function App() {
         setCheckResult(null);
       }
 
-      const alertsRes = await fetch(`${API_BASE}/api/monitoring/alerts`);
+      const alertsRes = await apiFetch(`${API_BASE}/api/monitoring/alerts`);
       const alertsData = await alertsRes.json();
       const alerts = alertsData.alerts || [];
 
@@ -262,12 +287,16 @@ function App() {
 
   const handleToggleMonitoring = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/monitoring/toggle`, {
+      const res = await apiFetch(`${API_BASE}/api/monitoring/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !monitoring.enabled }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        addConsoleLog(`Access Denied: ${data.detail || 'Insufficient permissions.'}`, 'danger');
+        return;
+      }
       setMonitoring(data);
       addConsoleLog(
         data.enabled ? 'Background monitoring enabled (every 20 min).' : 'Background monitoring paused.',
@@ -292,7 +321,7 @@ function App() {
     setToasts([]);
     if (ids.length) {
       try {
-        await fetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
+        await apiFetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ alert_ids: ids }),
@@ -306,7 +335,7 @@ function App() {
   // Fetch status, reports, and logs
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/status`);
+      const res = await apiFetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
       markServerOnline();
@@ -341,7 +370,7 @@ function App() {
 
   const fetchReports = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/reports`);
+      const res = await apiFetch(`${API_BASE}/api/reports`);
       const data = await res.json();
       setReports(data);
     } catch (err) {
@@ -351,7 +380,7 @@ function App() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/logs`);
+      const res = await apiFetch(`${API_BASE}/api/logs`);
       const data = await res.json();
       setSystemLogs(data.logs || []);
     } catch (err) {
@@ -363,7 +392,7 @@ function App() {
     setFilesLoading(true);
     try {
       const query = monitorId ? `?monitor_id=${encodeURIComponent(monitorId)}` : '';
-      const res = await fetch(`${API_BASE}/api/files${query}`);
+      const res = await apiFetch(`${API_BASE}/api/files${query}`);
       const data = await res.json();
       setMonitoredFiles(data.files || []);
     } catch (err) {
@@ -375,7 +404,7 @@ function App() {
 
   const fetchScanProgress = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/scan/progress`);
+      const res = await apiFetch(`${API_BASE}/api/scan/progress`);
       if (res.ok) {
         markServerOnline();
         setScanProgress(await res.json());
@@ -407,7 +436,7 @@ function App() {
 
     boot();
 
-    const monitoringInterval = setInterval(fetchMonitoring, 30000);
+    const monitoringInterval = setInterval(fetchMonitoring, 2500);
     const healthInterval = setInterval(async () => {
       if (cancelled) return;
       await resolveApiBase();
@@ -432,7 +461,7 @@ function App() {
 
   const refreshMonitorState = async (monitorId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/status`);
+      const res = await apiFetch(`${API_BASE}/api/status`);
       if (!res.ok) throw new Error('offline');
       const data = await res.json();
       markServerOnline();
@@ -452,7 +481,7 @@ function App() {
     setFolderLoading(true);
     try {
       addConsoleLog('Opening folder picker…', 'info');
-      const res = await fetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
       const data = await res.json();
       if (data.success && data.baseline_created) {
         addConsoleLog(`Folder added: ${data.folder_path}`, 'success');
@@ -489,7 +518,7 @@ function App() {
     setFolderLoading(true);
     try {
       addConsoleLog('Opening file picker with multiple selection…', 'info');
-      const res = await fetch(`${API_BASE}/api/select-files`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/api/select-files`, { method: 'POST' });
       const data = await res.json();
       if (data.success && data.baseline_created) {
         const action = data.is_new_monitor === false ? 'updated' : 'added';
@@ -522,7 +551,7 @@ function App() {
     }
     setFolderLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/monitors/folder`, {
+      const res = await apiFetch(`${API_BASE}/api/monitors/folder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder_path: path }),
@@ -564,7 +593,7 @@ function App() {
     });
     if (!confirmed) return;
     try {
-      const res = await fetch(`${API_BASE}/api/monitors/${encodeURIComponent(monitorId)}`, {
+      const res = await apiFetch(`${API_BASE}/api/monitors/${encodeURIComponent(monitorId)}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -595,7 +624,7 @@ function App() {
     setLoading(true);
     addConsoleLog('Running immediate integrity check…', 'info');
     try {
-      const res = await fetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
         setCheckResult(data);
@@ -628,7 +657,7 @@ function App() {
     if (!confirmed) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/baseline/accept`, {
+      const res = await apiFetch(`${API_BASE}/api/baseline/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ monitor_id: activeMonitorId }),
@@ -661,7 +690,7 @@ function App() {
     if (!confirmed) return;
     setRestoringPath(path);
     try {
-      const res = await fetch(`${API_BASE}/api/files/restore`, {
+      const res = await apiFetch(`${API_BASE}/api/files/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, monitor_id: activeMonitorId }),
@@ -702,7 +731,7 @@ function App() {
 
   const handleSelectMonitor = async (monitorId) => {
     try {
-      await fetch(`${API_BASE}/api/monitors/active`, {
+      await apiFetch(`${API_BASE}/api/monitors/active`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ monitor_id: monitorId }),
@@ -726,7 +755,7 @@ function App() {
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`, {
+      const res = await apiFetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -793,7 +822,8 @@ function App() {
 
       <AppHeader
         pageTitle={HEADER_META[activeTab]?.title || 'Overview'}
-        version="2.0.0"
+        currentRole={currentRole}
+        onSelectRole={handleRoleChange}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((value) => !value)}
         onStartTour={() => setActiveTab('help')}

@@ -5,11 +5,13 @@ from config import (
     MONITORING_INTERVAL_SECONDS,
     SETTINGS_FILE,
     HASH_ONLY_SIZE_BYTES,
+    ENABLE_REALTIME_KERNEL_EVENTS,
 )
 
 DEFAULT_SETTINGS = {
     "monitoring_interval_seconds": MONITORING_INTERVAL_SECONDS,
     "monitoring_enabled": True,
+    "realtime_kernel_enabled": ENABLE_REALTIME_KERNEL_EVENTS,
     "excluded_extensions": [".tmp", ".swp", ".DS_Store"],
     "hash_only_enabled": True,
     "hash_only_size_bytes": HASH_ONLY_SIZE_BYTES,

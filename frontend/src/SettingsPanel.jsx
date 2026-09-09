@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Settings, Moon, Sun, CheckCircle, AlertCircle } from 'lucide-react';
 
-import { API_BASE } from './api';
+import { API_BASE, apiFetch } from './api';
 
 function normalizeSettings(data) {
   const { app_version: _version, ...settings } = data;
   return {
     monitoring_interval_seconds: settings.monitoring_interval_seconds ?? 1200,
     monitoring_enabled: settings.monitoring_enabled ?? true,
+    realtime_kernel_enabled: settings.realtime_kernel_enabled ?? true,
     excluded_extensions: settings.excluded_extensions ?? ['.tmp', '.swp', '.DS_Store'],
     hash_only_enabled: settings.hash_only_enabled ?? true,
     hash_only_size_bytes: settings.hash_only_size_bytes ?? 1048576,
@@ -19,6 +20,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
   const [settings, setSettings] = useState({
     monitoring_interval_seconds: 1200,
     monitoring_enabled: true,
+    realtime_kernel_enabled: true,
     excluded_extensions: ['.tmp', '.swp', '.DS_Store'],
     hash_only_enabled: true,
     hash_only_size_bytes: 1048576,
@@ -39,7 +41,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
       setLoadError(null);
 
       try {
-        const res = await fetch(`${API_BASE}/api/settings`);
+        const res = await apiFetch(`${API_BASE}/api/settings`);
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data.detail || 'Could not load settings.');
@@ -79,13 +81,14 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
       const payload = {
         monitoring_interval_seconds: intervalMinutes * 60,
         monitoring_enabled: settings.monitoring_enabled,
+        realtime_kernel_enabled: settings.realtime_kernel_enabled,
         hash_only_enabled: settings.hash_only_enabled,
         hash_only_size_bytes: hashMb * 1024 * 1024,
         max_reports_retained: maxReports,
         excluded_extensions: excludedText.split(',').map((item) => item.trim()).filter(Boolean),
       };
 
-      const res = await fetch(`${API_BASE}/api/settings`, {
+      const res = await apiFetch(`${API_BASE}/api/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -99,7 +102,7 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
         const interval = Math.round(normalized.monitoring_interval_seconds / 60);
         const pruned = data.reports_pruned ? `, ${data.reports_pruned} old report(s) removed` : '';
         setSaveMessage(
-          `Saved. Checks every ${interval} min, monitoring ${normalized.monitoring_enabled ? 'on' : 'off'}${pruned}.`
+          `Saved. Checks every ${interval} min, background monitoring ${normalized.monitoring_enabled ? 'on' : 'off'}, real-time OS kernel engine ${normalized.realtime_kernel_enabled ? 'active' : 'disabled'}${pruned}.`
         );
         onSaved?.(normalized);
       } else {
@@ -187,6 +190,15 @@ export default function SettingsPanel({ darkMode, onToggleDarkMode, onSaved }) {
             onChange={(e) => setSettings({ ...settings, monitoring_enabled: e.target.checked })}
           />
           Background monitoring enabled
+        </label>
+
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={settings.realtime_kernel_enabled}
+            onChange={(e) => setSettings({ ...settings, realtime_kernel_enabled: e.target.checked })}
+          />
+          Real-time OS kernel monitoring (Watchdog Engine)
         </label>
 
         <label className="settings-checkbox">

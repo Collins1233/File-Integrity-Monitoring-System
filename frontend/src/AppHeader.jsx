@@ -11,7 +11,8 @@ const APP_LOGO = '/fim-logo.png';
 
 export default function AppHeader({
   pageTitle,
-  version = '2.0.0',
+  currentRole = 'admin',
+  onSelectRole,
   darkMode,
   onToggleDarkMode,
   onStartTour,
@@ -109,7 +110,28 @@ export default function AppHeader({
           </button>
         )}
 
-        <span className="top-bar-version">v{version}</span>
+        <select
+          value={currentRole}
+          onChange={(e) => onSelectRole?.(e.target.value)}
+          className="top-bar-role-select"
+          title="Active RBAC Role"
+          style={{
+            background: 'rgba(37,99,235,0.15)',
+            color: '#60a5fa',
+            border: '1px solid rgba(96,165,250,0.3)',
+            padding: '3px 8px',
+            borderRadius: '12px',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          <option value="admin" style={{ background: '#1e293b', color: '#fff' }}>🛡️ Admin Role</option>
+          <option value="analyst" style={{ background: '#1e293b', color: '#fff' }}>🔍 Analyst Role</option>
+          <option value="auditor" style={{ background: '#1e293b', color: '#fff' }}>📋 Auditor Role</option>
+          <option value="viewer" style={{ background: '#1e293b', color: '#fff' }}>👁️ Viewer Role</option>
+        </select>
       </div>
     </header>
   );

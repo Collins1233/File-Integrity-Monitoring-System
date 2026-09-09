@@ -8,13 +8,23 @@ import subprocess
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 
+from auth import (
+    Role,
+    DEFAULT_ADMIN_API_KEY,
+    create_access_token,
+    get_current_user_and_role,
+    require_admin,
+    require_analyst,
+    require_auditor,
+    require_viewer,
+)
 from scanner import scan_folder_with_options
 from baseline_store import (
     add_monitor,
@@ -79,6 +89,7 @@ class AcknowledgeAlertsRequest(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     monitoring_interval_seconds: Optional[int] = None
     monitoring_enabled: Optional[bool] = None
+    realtime_kernel_enabled: Optional[bool] = None
     excluded_extensions: Optional[list[str]] = None
     hash_only_enabled: Optional[bool] = None
     hash_only_size_bytes: Optional[int] = None
@@ -93,6 +104,41 @@ class RestoreFileRequest(BaseModel):
 
 class AcceptBaselineRequest(BaseModel):
     monitor_id: Optional[str] = None
+
+class TokenRequest(BaseModel):
+    api_key: Optional[str] = None
+    role: Optional[str] = None
+
+
+@app.get("/api/auth/me")
+def api_auth_me(current_user: dict = Depends(get_current_user_and_role)):
+    return {
+        "user": current_user.get("user"),
+        "role": current_user.get("role"),
+        "permissions": current_user.get("permissions"),
+        "is_local_fallback": current_user.get("is_local_fallback", False),
+        "default_admin_key": DEFAULT_ADMIN_API_KEY,
+    }
+
+
+@app.post("/api/auth/token")
+def api_auth_token(request: TokenRequest):
+    requested_role = (request.role or "admin").lower()
+    if requested_role not in [r.value for r in Role]:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {requested_role}")
+
+    if request.api_key and request.api_key != DEFAULT_ADMIN_API_KEY:
+        if not request.api_key.startswith("fim_"):
+            raise HTTPException(status_code=401, detail="Invalid API Key.")
+
+    token = create_access_token(user_id=f"user_{requested_role}", role=requested_role)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": requested_role,
+        "expires_in_minutes": 480,
+    }
+
 
 
 def _read_dev_session() -> str:
@@ -148,6 +194,8 @@ def create_baseline_for_folder(folder_path: str) -> dict:
         f"({len(monitor['files'])} files, {len(get_monitors())} monitor(s))"
     )
 
+    monitor_service.sync_monitors()
+
     return {
         "success": True,
         "baseline_created": True,
@@ -164,6 +212,7 @@ def create_baseline_for_folder(folder_path: str) -> dict:
 def create_baseline_for_files(file_paths: list[str]) -> dict:
     monitor = add_files_monitor(file_paths, set_active=True)
     is_new = monitor.pop("is_new_monitor", True)
+    monitor_service.sync_monitors()
     return {
         "success": True,
         "baseline_created": True,
@@ -193,7 +242,7 @@ def api_get_settings():
         raise HTTPException(status_code=500, detail="Could not read settings file.")
 
 
-@app.put("/api/settings")
+@app.put("/api/settings", dependencies=[Depends(require_admin)])
 async def api_update_settings(request: SettingsUpdateRequest):
     try:
         payload = {key: value for key, value in request.model_dump().items() if value is not None}
@@ -222,7 +271,7 @@ def api_list_monitors():
     return {"monitors": _status_payload()["monitors"], "active_monitor_id": _status_payload()["active_monitor_id"]}
 
 
-@app.post("/api/monitors/active")
+@app.post("/api/monitors/active", dependencies=[Depends(require_analyst)])
 def api_set_active_monitor(request: ActiveMonitorRequest):
     monitor = set_active_monitor(request.monitor_id)
     if not monitor:
@@ -230,14 +279,15 @@ def api_set_active_monitor(request: ActiveMonitorRequest):
     return {"success": True, "active_monitor_id": monitor["id"], "folder_path": monitor["folder_path"]}
 
 
-@app.delete("/api/monitors/{monitor_id}")
+@app.delete("/api/monitors/{monitor_id}", dependencies=[Depends(require_admin)])
 def api_remove_monitor(monitor_id: str):
     if not remove_monitor(monitor_id):
         raise HTTPException(status_code=404, detail="Monitor not found.")
+    monitor_service.sync_monitors()
     return {"success": True, **_status_payload()}
 
 
-@app.post("/api/baseline/accept")
+@app.post("/api/baseline/accept", dependencies=[Depends(require_analyst)])
 def api_accept_baseline(request: AcceptBaselineRequest):
     result = accept_monitor_changes(request.monitor_id)
     if not result.get("success"):
@@ -245,7 +295,7 @@ def api_accept_baseline(request: AcceptBaselineRequest):
     return result
 
 
-@app.post("/api/files/restore")
+@app.post("/api/files/restore", dependencies=[Depends(require_analyst)])
 def api_restore_file(request: RestoreFileRequest):
     result = restore_file(request.path, request.monitor_id)
     if not result.get("success"):
@@ -289,7 +339,7 @@ def api_restore_file(request: RestoreFileRequest):
     return {**result, "last_result": monitor_service.last_result}
 
 
-@app.post("/api/select-folder")
+@app.post("/api/select-folder", dependencies=[Depends(require_analyst)])
 def select_folder():
     import platform
 
@@ -313,7 +363,7 @@ def select_folder():
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@app.post("/api/create-baseline")
+@app.post("/api/create-baseline", dependencies=[Depends(require_analyst)])
 def api_create_baseline(request: FolderRequest):
     folder_path = normalize_folder_path(request.folder_path) if request.folder_path else ""
     if not folder_path or not folder_exists(request.folder_path):
@@ -327,7 +377,7 @@ def api_resolve_folder_path(request: FolderRequest):
     return resolve_folder_path(request.folder_path or "")
 
 
-@app.post("/api/monitors/folder")
+@app.post("/api/monitors/folder", dependencies=[Depends(require_analyst)])
 def api_add_folder_monitor(request: FolderRequest):
     if not request.folder_path or not request.folder_path.strip():
         raise HTTPException(status_code=400, detail="Enter a folder path.")
@@ -337,7 +387,7 @@ def api_add_folder_monitor(request: FolderRequest):
     return create_baseline_for_folder(resolved["normalized"])
 
 
-@app.post("/api/monitors/files")
+@app.post("/api/monitors/files", dependencies=[Depends(require_analyst)])
 def api_add_files_monitor(request: FilesRequest):
     if not request.file_paths:
         raise HTTPException(status_code=400, detail="Provide at least one file path.")
@@ -347,7 +397,7 @@ def api_add_files_monitor(request: FilesRequest):
         raise HTTPException(status_code=400, detail=str(error))
 
 
-@app.post("/api/select-files")
+@app.post("/api/select-files", dependencies=[Depends(require_analyst)])
 def select_files():
     import platform
 
@@ -368,7 +418,7 @@ def select_files():
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@app.post("/api/check-integrity")
+@app.post("/api/check-integrity", dependencies=[Depends(require_analyst)])
 def api_check_integrity():
     result = run_integrity_check(generate_report=True)
     if not result.get("success"):
@@ -376,7 +426,7 @@ def api_check_integrity():
     return result
 
 
-@app.post("/api/monitoring/check-now")
+@app.post("/api/monitoring/check-now", dependencies=[Depends(require_analyst)])
 async def api_check_now():
     if not get_monitors():
         raise HTTPException(status_code=400, detail="No baseline found. Select a folder first.")
@@ -554,7 +604,7 @@ def api_acknowledge_alerts(request: AcknowledgeAlertsRequest):
     return {"cleared": cleared}
 
 
-@app.post("/api/monitoring/toggle")
+@app.post("/api/monitoring/toggle", dependencies=[Depends(require_admin)])
 def api_monitoring_toggle(request: MonitoringToggleRequest):
     monitor_service.set_enabled(request.enabled)
     return monitor_service.get_status()
@@ -596,7 +646,7 @@ def api_download_report(filename: str):
     )
 
 
-@app.delete("/api/reports/{filename}")
+@app.delete("/api/reports/{filename}", dependencies=[Depends(require_admin)])
 def api_delete_report(filename: str):
     try:
         deleted = delete_report_file(filename)
@@ -605,6 +655,35 @@ def api_delete_report(filename: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Report file not found.")
     return {"success": True, "deleted": filename, "remaining": len(list_reports()), "max_retained": MAX_REPORTS_RETAINED}
+
+
+@app.get("/api/docs/download/{filename}")
+def api_download_doc(filename: str):
+    allowed_files = {
+        "bank_compliance": "FIMS_Bank_Compliance_Roadmap_and_Phases.docx",
+        "backend": "FIMS_Backend_Documentation.docx",
+        "FIMS_Bank_Compliance_Roadmap_and_Phases.docx": "FIMS_Bank_Compliance_Roadmap_and_Phases.docx",
+        "FIMS_Backend_Documentation.docx": "FIMS_Backend_Documentation.docx",
+    }
+    target_name = allowed_files.get(filename)
+    if not target_name:
+        raise HTTPException(status_code=400, detail="Invalid document requested.")
+    
+    file_path = os.path.join(PROJECT_ROOT, target_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Documentation file not found.")
+        
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=target_name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{target_name}"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
+
 
 
 def _parse_logs():

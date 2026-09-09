@@ -43,3 +43,38 @@ export async function resolveApiBase() {
 export function isNetworkError(err) {
   return err instanceof TypeError && /failed to fetch|network|load failed/i.test(String(err.message));
 }
+
+export function getStoredRole() {
+  return localStorage.getItem('fim_user_role') || 'admin';
+}
+
+export function setStoredRole(role) {
+  localStorage.setItem('fim_user_role', role);
+}
+
+export function getStoredApiKey() {
+  return localStorage.getItem('fim_api_key') || '';
+}
+
+export function setStoredApiKey(key) {
+  localStorage.setItem('fim_api_key', key);
+}
+
+export function getAuthHeaders() {
+  const apiKey = getStoredApiKey();
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
+  }
+  return headers;
+}
+
+export async function apiFetch(url, options = {}) {
+  const authHeaders = getAuthHeaders();
+  const mergedHeaders = {
+    ...authHeaders,
+    ...(options.headers || {}),
+  };
+  return fetch(url, { ...options, headers: mergedHeaders });
+}
+
