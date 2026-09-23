@@ -38,6 +38,7 @@ from baseline_store import (
     count_unique_monitored_files,
     legacy_load_baseline as load_baseline,
     normalize_folder_path,
+    verify_store_integrity,
 )
 from integrity import run_integrity_check
 from monitor import monitor_service
@@ -47,7 +48,6 @@ from logger import save_log
 from settings_manager import load_settings, save_settings
 from scan_progress import scan_progress
 from config import APP_VERSION, DEV_SESSION_FILE, FRONTEND_DIST, LOG_FILE, MAX_REPORTS_RETAINED, PROJECT_ROOT, REPORT_FOLDER, SUPPORTED_FILE_TYPES, TEXT_EXTENSIONS
-from native_picker import pick_files, pick_folder
 from textdiff import read_text_file
 from file_preview import extract_preview_text, resolve_content_path, guess_media_type, is_image_type
 
@@ -156,10 +156,16 @@ def _read_dev_session() -> str:
 def _status_payload():
     monitors = get_monitors()
     active = get_active_monitor()
+    is_valid, reason = verify_store_integrity()
     return {
         "app_version": APP_VERSION,
         "dev_session": _read_dev_session(),
         "has_baseline": len(monitors) > 0,
+        "baseline_integrity": {
+            "is_valid": is_valid,
+            "status": reason,
+            "tamper_detected": (not is_valid and reason == "SIGNATURE_MISMATCH"),
+        },
         "folder_path": active["folder_path"] if active else "",
         "created_at": active["created_at"] if active else "",
         "file_count": count_unique_monitored_files(monitors),
@@ -230,6 +236,17 @@ def create_baseline_for_files(file_paths: list[str]) -> dict:
 @app.get("/api/status")
 def get_status():
     return _status_payload()
+
+
+@app.get("/api/baseline/verify")
+def api_verify_baseline():
+    is_valid, reason = verify_store_integrity()
+    return {
+        "valid": is_valid,
+        "status": reason,
+        "tamper_detected": (not is_valid and reason == "SIGNATURE_MISMATCH"),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 @app.get("/api/settings")
@@ -339,28 +356,149 @@ def api_restore_file(request: RestoreFileRequest):
     return {**result, "last_result": monitor_service.last_result}
 
 
+def _get_available_roots() -> list[str]:
+    roots = []
+    if os.name == "nt":
+        import string
+        try:
+            from ctypes import windll
+            bitmask = windll.kernel32.GetLogicalDrives()
+            for letter in string.ascii_uppercase:
+                if bitmask & 1:
+                    drive = f"{letter}:\\"
+                    if os.path.exists(drive):
+                        roots.append(drive)
+                bitmask >>= 1
+        except Exception:
+            for letter in string.ascii_uppercase:
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    roots.append(drive)
+    else:
+        roots.append("/")
+    return roots
+
+
+def _get_directory_presets() -> list[dict]:
+    home = os.path.expanduser("~")
+    presets = []
+
+    # 1. Demo Files
+    demo_path = os.path.join(PROJECT_ROOT, "demo_files")
+    if os.path.exists(demo_path):
+        presets.append({
+            "name": "Demo Test Files",
+            "path": os.path.abspath(demo_path),
+            "description": "Built-in demo folder for testing integrity checks",
+        })
+
+    # 2. Desktop
+    desktop = os.path.join(home, "Desktop")
+    if os.path.exists(desktop):
+        presets.append({
+            "name": "Desktop",
+            "path": os.path.abspath(desktop),
+            "description": "User Desktop directory",
+        })
+
+    # 3. Documents
+    docs = os.path.join(home, "Documents")
+    if os.path.exists(docs):
+        presets.append({
+            "name": "Documents",
+            "path": os.path.abspath(docs),
+            "description": "User Documents directory",
+        })
+
+    # 4. User Home
+    if os.path.exists(home):
+        presets.append({
+            "name": "Home Directory",
+            "path": os.path.abspath(home),
+            "description": "Current user profile home",
+        })
+
+    # 5. Project Root
+    if os.path.exists(PROJECT_ROOT):
+        presets.append({
+            "name": "Project Workspace",
+            "path": os.path.abspath(PROJECT_ROOT),
+            "description": "FIMS application root folder",
+        })
+
+    return presets
+
+
+@app.get("/api/browse-directory")
+def api_browse_directory(path: Optional[str] = None):
+    available_roots = _get_available_roots()
+    presets = _get_directory_presets()
+
+    target_path = path.strip() if path and path.strip() else ""
+    if not target_path:
+        demo_path = os.path.join(PROJECT_ROOT, "demo_files")
+        if os.path.exists(demo_path):
+            target_path = demo_path
+        elif os.path.exists(os.path.expanduser("~")):
+            target_path = os.path.expanduser("~")
+        elif available_roots:
+            target_path = available_roots[0]
+        else:
+            target_path = PROJECT_ROOT
+
+    target_path = os.path.abspath(target_path)
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail=f"Path not found: {target_path}")
+
+    if os.path.isfile(target_path):
+        current_dir = os.path.dirname(target_path)
+    else:
+        current_dir = target_path
+
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir == current_dir:
+        parent_dir = None
+
+    items = []
+    try:
+        with os.scandir(current_dir) as entries:
+            for entry in entries:
+                if entry.name.startswith((".", "$")):
+                    continue
+                try:
+                    stat_info = entry.stat(follow_symlinks=False)
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    items.append({
+                        "name": entry.name,
+                        "path": os.path.abspath(entry.path),
+                        "is_dir": is_dir,
+                        "size": stat_info.st_size if not is_dir else 0,
+                        "modified": datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+                except (PermissionError, OSError):
+                    continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Access denied to directory: {current_dir}")
+    except OSError as err:
+        raise HTTPException(status_code=500, detail=f"Error reading directory: {err}")
+
+    items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+
+    return {
+        "current_path": current_dir,
+        "parent_path": parent_dir,
+        "roots": available_roots,
+        "presets": presets,
+        "items": items,
+    }
+
+
 @app.post("/api/select-folder", dependencies=[Depends(require_analyst)])
 def select_folder():
-    import platform
-
-    picker_timeout = 120 if platform.system() == "Windows" else 60
-
-    try:
-        folder_path = pick_folder(timeout=picker_timeout)
-        if folder_path:
-            return create_baseline_for_folder(folder_path)
-        return {"folder_path": "", "info": "Folder selection was cancelled."}
-    except subprocess.TimeoutExpired:
-        logger.warning("Folder picker timed out; falling back to manual path entry.")
-        return {
-            "folder_path": "",
-            "info": "Folder picker could not open in this environment. Please paste the folder path manually in the text box and click Add folder.",
-        }
-    except FileNotFoundError:
-        return {"folder_path": "", "info": "Native folder picker is not available on this system. Please paste the folder path manually."}
-    except Exception as error:
-        logger.error("Folder picker failed: %s", error)
-        raise HTTPException(status_code=500, detail=str(error))
+    return {
+        "folder_path": "",
+        "info": "Native OS dialogs have been replaced with the web browser dialog. Please use the in-app folder selector.",
+    }
 
 
 @app.post("/api/create-baseline", dependencies=[Depends(require_analyst)])
@@ -399,23 +537,10 @@ def api_add_files_monitor(request: FilesRequest):
 
 @app.post("/api/select-files", dependencies=[Depends(require_analyst)])
 def select_files():
-    import platform
-
-    picker_timeout = 120 if platform.system() == "Windows" else 60
-
-    try:
-        file_paths = pick_files(timeout=picker_timeout)
-        if file_paths:
-            return create_baseline_for_files(file_paths)
-        return {"folder_path": "", "info": "File selection was cancelled."}
-    except subprocess.TimeoutExpired:
-        logger.warning("File picker timed out; falling back to manual path entry.")
-        return {"folder_path": "", "info": "File picker could not open in this environment. Please use the manual path entry instead."}
-    except FileNotFoundError:
-        return {"folder_path": "", "info": "Native file picker is not available on this system."}
-    except Exception as error:
-        logger.error("File picker failed: %s", error)
-        raise HTTPException(status_code=500, detail=str(error))
+    return {
+        "folder_path": "",
+        "info": "Native OS dialogs have been replaced with the web browser dialog. Please use the in-app file selector.",
+    }
 
 
 @app.post("/api/check-integrity", dependencies=[Depends(require_analyst)])

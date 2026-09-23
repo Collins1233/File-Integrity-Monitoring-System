@@ -148,6 +148,8 @@ class MonitorService:
         self.observer_manager = RealtimeObserverManager(self._on_kernel_event_sync)
 
     def _fingerprint(self, result: dict) -> Optional[str]:
+        if result.get("tamper_detected"):
+            return "tamper_detected"
         if not result.get("success"):
             return None
 
@@ -170,6 +172,33 @@ class MonitorService:
 
         self._last_alert_fingerprint = fingerprint
         self._alert_id += 1
+
+        if result.get("tamper_detected"):
+            alert = {
+                "id": self._alert_id,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "fingerprint": fingerprint,
+                "is_tamper_alert": True,
+                "severity": "CRITICAL",
+                "modified_count": 0,
+                "deleted_count": 0,
+                "new_count": 0,
+                "total_changes": 1,
+                "message": result.get("message", "CRITICAL SECURITY ALERT: Baseline signature mismatch!"),
+                "affected_files": [{
+                    "name": "baseline.json",
+                    "path": "baseline.json",
+                    "change": "tampered",
+                }],
+                "modified_files": [],
+                "deleted_files": [],
+                "new_files": [],
+                "text_differences": {},
+            }
+            self._pending_alerts.append(alert)
+            if len(self._pending_alerts) > 50:
+                self._pending_alerts = self._pending_alerts[-50:]
+            return
 
         affected_files = []
         for file_path in result.get("modified_files", []):
@@ -282,7 +311,7 @@ class MonitorService:
             )
             self.last_check_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.last_result = result
-            if result.get("success"):
+            if result and (result.get("success") or result.get("tamper_detected")):
                 self._maybe_create_alert(result)
             return result
         except Exception as error:

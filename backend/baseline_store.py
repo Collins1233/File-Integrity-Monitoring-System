@@ -1,12 +1,98 @@
+import hashlib
+import hmac
 import json
+import logging
 import os
+import secrets
 import shutil
 import uuid
 from datetime import datetime
 
 from scanner import scan_folder_with_options, scan_files_with_options
-from config import BASELINE_FILE, BASELINE_FOLDER, BACKUP_FILE_TYPES, PROJECT_ROOT
+from config import BASELINE_FILE, BASELINE_FOLDER, BACKUP_FILE_TYPES, PROJECT_ROOT, BASELINE_HMAC_KEY_FILE
 from path_utils import normalize_folder_path, folder_exists
+
+logger = logging.getLogger("FIM_BaselineStore")
+
+
+def _get_or_create_hmac_key() -> bytes:
+    """Retrieves or creates a 256-bit cryptographically secure secret key for baseline HMAC signing."""
+    env_key = os.environ.get("FIMS_BASELINE_HMAC_KEY")
+    if env_key:
+        return env_key.encode("utf-8")
+
+    if os.path.exists(BASELINE_HMAC_KEY_FILE):
+        try:
+            with open(BASELINE_HMAC_KEY_FILE, "rb") as f:
+                key = f.read().strip()
+                if key:
+                    return key
+        except OSError as err:
+            logger.warning("Failed to read HMAC key file %s: %s", BASELINE_HMAC_KEY_FILE, err)
+
+    new_key = secrets.token_bytes(32)
+    os.makedirs(os.path.dirname(BASELINE_HMAC_KEY_FILE), exist_ok=True)
+    try:
+        with open(BASELINE_HMAC_KEY_FILE, "wb") as f:
+            f.write(new_key)
+        try:
+            os.chmod(BASELINE_HMAC_KEY_FILE, 0o600)
+        except OSError:
+            pass
+    except OSError as err:
+        logger.error("Could not persist HMAC key file: %s", err)
+    return new_key
+
+
+def _clean_store_for_signing(store: dict) -> dict:
+    """Returns a copy of store without the signature field for canonical hashing."""
+    return {k: v for k, v in store.items() if k != "signature"}
+
+
+def compute_store_signature(store: dict, key: bytes | None = None) -> str:
+    """Computes HMAC-SHA256 over the canonical JSON representation of store without signature."""
+    if key is None:
+        key = _get_or_create_hmac_key()
+    clean = _clean_store_for_signing(store)
+    canonical_bytes = json.dumps(clean, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return hmac.new(key, canonical_bytes, hashlib.sha256).hexdigest()
+
+
+def verify_store_integrity(store: dict | None = None) -> tuple[bool, str]:
+    """
+    Verifies the cryptographic HMAC-SHA256 signature of the baseline store.
+    Returns:
+        (True, "VALID") -> Signature matches canonical payload.
+        (True, "UNSIGNED_LEGACY") -> Store exists but has no signature (legacy/first-run).
+        (False, "SIGNATURE_MISMATCH") -> Signature is present but does not match computed HMAC.
+        (False, "FILE_NOT_FOUND") -> Baseline file does not exist.
+        (False, "INVALID_FORMAT") -> Baseline cannot be parsed as JSON.
+    """
+    if store is None:
+        if not os.path.exists(BASELINE_FILE):
+            return False, "FILE_NOT_FOUND"
+        try:
+            with open(BASELINE_FILE, "r", encoding="utf-8") as f:
+                store = json.load(f)
+        except Exception as err:
+            return False, f"INVALID_FORMAT: {err}"
+
+    monitors = store.get("monitors", [])
+    if not monitors and not store.get("folder_path") and not store.get("files"):
+        return True, "VALID"
+
+    stored_signature = store.get("signature")
+    if not stored_signature:
+        return True, "UNSIGNED_LEGACY"
+
+    key = _get_or_create_hmac_key()
+    expected_signature = compute_store_signature(store, key)
+
+    if hmac.compare_digest(stored_signature, expected_signature):
+        return True, "VALID"
+    return False, "SIGNATURE_MISMATCH"
+
+
 def find_folder_monitor(folder_path: str, monitors: list[dict] | None = None) -> dict | None:
     normalized = normalize_folder_path(folder_path)
     source = monitors if monitors is not None else load_store().get("monitors", [])
@@ -54,6 +140,11 @@ def _empty_store():
 
 
 def _save_store(store: dict) -> None:
+    # Always compute and persist HMAC-SHA256 signature
+    key = _get_or_create_hmac_key()
+    signature = compute_store_signature(store, key)
+    store["signature"] = signature
+
     with open(BASELINE_FILE, "w", encoding="utf-8") as file:
         json.dump(store, file, indent=4)
 
@@ -64,7 +155,7 @@ def _migrate_v1(raw: dict) -> dict:
 
     if "folder_path" in raw and "files" in raw:
         monitor_id = str(uuid.uuid4())[:8]
-        return {
+        migrated = {
             "version": 2,
             "monitors": [{
                 "id": monitor_id,
@@ -74,6 +165,9 @@ def _migrate_v1(raw: dict) -> dict:
             }],
             "active_monitor_id": monitor_id,
         }
+        if "signature" in raw:
+            migrated["signature"] = raw["signature"]
+        return migrated
 
     return _empty_store()
 
@@ -85,9 +179,21 @@ def load_store() -> dict:
     with open(BASELINE_FILE, "r", encoding="utf-8") as file:
         raw = json.load(file)
 
+    is_valid, reason = verify_store_integrity(raw)
+    if not is_valid and reason == "SIGNATURE_MISMATCH":
+        logger.critical(
+            "CRITICAL SECURITY ALERT: Baseline signature mismatch in %s! Tampering detected. Refusing to auto-save.",
+            BASELINE_FILE
+        )
+        return raw
+
     store = _migrate_v1(raw)
     normalized = _dedupe_folder_monitors(store)
-    if normalized != raw:
+
+    # Auto-sign legacy baselines on first load or re-save if normalized
+    if "signature" not in normalized and normalized.get("monitors"):
+        _save_store(normalized)
+    elif normalized != raw:
         _save_store(normalized)
     return normalized
 

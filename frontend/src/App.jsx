@@ -38,6 +38,7 @@ import SettingsPanel from './SettingsPanel';
 import HelpTour from './HelpTour';
 import AppHeader from './AppHeader';
 import ConfirmDialog from './ConfirmDialog';
+import DirectoryBrowserModal from './DirectoryBrowserModal';
 import {
   formatAlertTitle,
   getAffectedFiles,
@@ -182,6 +183,8 @@ function App() {
   const busyRef = useRef(false);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
+  const [browserModalOpen, setBrowserModalOpen] = useState(false);
+  const [browserModalMode, setBrowserModalMode] = useState('folder');
 
   const requestConfirm = useCallback((options) => new Promise((resolve) => {
     confirmResolver.current = resolve;
@@ -477,36 +480,45 @@ function App() {
   };
 
   // Actions
-  const handleSelectFolder = async () => {
+  const handleSelectFolder = () => {
+    setBrowserModalMode('folder');
+    setBrowserModalOpen(true);
+  };
+
+  const handleSelectFiles = () => {
+    setBrowserModalMode('files');
+    setBrowserModalOpen(true);
+  };
+
+  const handleFolderBrowserSelect = async (folderPath) => {
+    if (!folderPath) return;
     setFolderLoading(true);
     try {
-      addConsoleLog('Opening folder picker…', 'info');
-      const res = await apiFetch(`${API_BASE}/api/select-folder`, { method: 'POST' });
+      addConsoleLog(`Adding folder monitor: ${folderPath}…`, 'info');
+      const res = await apiFetch(`${API_BASE}/api/monitors/folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
       const data = await res.json();
-      if (data.success && data.baseline_created) {
-        addConsoleLog(`Folder added: ${data.folder_path}`, 'success');
-        const action = data.is_new_monitor ? 'created' : 'refreshed';
+      if (res.ok && data.success) {
+        const action = data.is_new_monitor ? 'added' : 'already monitored (baseline refreshed)';
+        addConsoleLog(`Folder ${action}: ${data.folder_path}`, data.is_new_monitor ? 'success' : 'warning');
         addConsoleLog(
-          `Baseline ${action}: ${data.file_count} files snapshotted (${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total).`,
+          `${data.file_count} files in baseline. ${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total.`,
           'success'
         );
-        if (data.folder_path) {
-          setFolderPathInput(data.folder_path);
-        }
+        setFolderPathInput(data.folder_path);
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
-      } else if (data.info) {
-        addConsoleLog(data.info, 'warning');
-      } else if (data.error) {
-        addConsoleLog(`Native folder picker failed: ${data.error}`, 'warning');
-      } else if (!res.ok) {
-        addConsoleLog(`Failed to add folder: ${data.detail || 'Unknown error'}`, 'danger');
+      } else {
+        const msg = formatApiError(data.detail, 'Invalid or missing folder path');
+        addConsoleLog(`Could not add folder: ${msg}`, 'danger');
       }
     } catch (err) {
-      console.error(err);
       addConsoleLog(
-        isNetworkError(err) ? API_CONNECTION_HELP : `Error using folder picker: ${err.message}`,
+        isNetworkError(err) ? API_CONNECTION_HELP : `Error adding folder: ${err.message}`,
         'danger'
       );
     } finally {
@@ -514,13 +526,18 @@ function App() {
     }
   };
 
-  const handleSelectFiles = async () => {
+  const handleFilesBrowserSelect = async (filePaths) => {
+    if (!filePaths || filePaths.length === 0) return;
     setFolderLoading(true);
     try {
-      addConsoleLog('Opening file picker with multiple selection…', 'info');
-      const res = await apiFetch(`${API_BASE}/api/select-files`, { method: 'POST' });
+      addConsoleLog(`Adding ${filePaths.length} file(s) to monitor…`, 'info');
+      const res = await apiFetch(`${API_BASE}/api/monitors/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_paths: filePaths }),
+      });
       const data = await res.json();
-      if (data.success && data.baseline_created) {
+      if (res.ok && data.success) {
         const action = data.is_new_monitor === false ? 'updated' : 'added';
         addConsoleLog(
           `Files ${action}: ${data.file_count} file${data.file_count === 1 ? '' : 's'} in this selection`,
@@ -530,13 +547,12 @@ function App() {
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
-      } else if (data.info) {
-        addConsoleLog(data.info, 'warning');
-      } else if (!res.ok) {
-        addConsoleLog(`Failed to add files: ${data.detail || 'Unknown error'}`, 'danger');
+      } else {
+        const msg = formatApiError(data.detail, 'Failed to add files');
+        addConsoleLog(`Could not add files: ${msg}`, 'danger');
       }
     } catch (err) {
-      addConsoleLog(`Error using file picker: ${err.message}`, 'warning');
+      addConsoleLog(`Error adding files: ${err.message}`, 'danger');
     } finally {
       setFolderLoading(false);
     }
@@ -638,7 +654,12 @@ function App() {
         fetchLogs();
         fetchMonitoring();
       } else {
-        addConsoleLog(`Check failed: ${data.detail || data.message || 'Unknown error'}`, 'danger');
+        if (data.tamper_detected) {
+          setCheckResult(data);
+          addConsoleLog(`🚨 ${data.message}`, 'danger');
+        } else {
+          addConsoleLog(`Check failed: ${data.detail || data.message || 'Unknown error'}`, 'danger');
+        }
       }
     } catch (err) {
       addConsoleLog(`Error running check: ${err.message}`, 'danger');
@@ -956,6 +977,33 @@ function App() {
               </div>
             )}
 
+            {/* Critical Tamper Alert Banner */}
+            {(status?.baseline_integrity?.tamper_detected || checkResult?.tamper_detected) && (
+              <div 
+                className="glass-panel" 
+                style={{ 
+                  background: 'rgba(239, 68, 68, 0.15)', 
+                  border: '1px solid var(--color-danger)', 
+                  padding: '1.25rem', 
+                  borderRadius: '12px', 
+                  marginBottom: '1.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  color: 'var(--color-danger)'
+                }}
+              >
+                <AlertTriangle size={32} />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>CRITICAL SECURITY WARNING: Baseline Tampering Detected!</h4>
+                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                    The cryptographic HMAC-SHA256 signature for <code>baseline.json</code> is invalid. 
+                    The baseline was altered outside of FIMS. Re-verify the baseline or recreate it immediately.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Stats Grid */}
             <section className="stats-grid">
               <div className="glass-panel stat-card stat-card-clickable" onClick={() => setActiveTab('files')} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setActiveTab('files')}>
@@ -1014,7 +1062,7 @@ function App() {
                         style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
                       >
                         <Folder size={20} />
-                        {folderLoading ? 'Opening…' : 'Add Folder'}
+                        {folderLoading ? 'Adding…' : 'Add Folder'}
                       </button>
                       <button
                         className="btn btn-secondary"
@@ -1125,6 +1173,22 @@ function App() {
                     <span className={status.has_baseline ? "text-success" : "text-danger"}>
                       {status.has_baseline ? "Active" : "No Baseline"}
                     </span>
+                  </div>
+                  <div>
+                    <span className="text-muted">Integrity: </span>
+                    {status.baseline_integrity?.tamper_detected ? (
+                      <span className="text-danger" style={{ fontWeight: 700 }}>
+                        🚨 Tamper Detected!
+                      </span>
+                    ) : status.baseline_integrity?.is_valid ? (
+                      <span className="text-success" style={{ fontWeight: 600 }}>
+                        🔒 HMAC-SHA256 Signed
+                      </span>
+                    ) : (
+                      <span className="text-warning">
+                        ⚠️ Unsigned Legacy
+                      </span>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted">Created: </span>
@@ -1446,6 +1510,15 @@ function App() {
         variant={confirmState?.variant}
         onConfirm={() => closeConfirm(true)}
         onCancel={() => closeConfirm(false)}
+      />
+
+      <DirectoryBrowserModal
+        open={browserModalOpen}
+        mode={browserModalMode}
+        apiBase={API_BASE}
+        onClose={() => setBrowserModalOpen(false)}
+        onSelectFolder={handleFolderBrowserSelect}
+        onSelectFiles={handleFilesBrowserSelect}
       />
     </div>
   );

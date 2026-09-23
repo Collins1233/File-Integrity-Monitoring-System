@@ -1,6 +1,6 @@
 import os
 
-from baseline_store import get_monitors, legacy_load_baseline as load_baseline
+from baseline_store import get_monitors, legacy_load_baseline as load_baseline, verify_store_integrity
 from scanner import scan_folder_with_options, scan_files_with_options
 from logger import save_log
 from textdiff import read_text_file, format_text_change
@@ -171,6 +171,28 @@ def _compare_monitor(monitor, generate_report=True):
 
 
 def run_integrity_check(generate_report=True, monitor_id=None):
+    is_valid, reason = verify_store_integrity()
+    if not is_valid and reason == "SIGNATURE_MISMATCH":
+        alert_msg = (
+            "CRITICAL SECURITY ALERT: Baseline signature mismatch. "
+            "The baseline file has been tampered with or modified outside of FIMS!"
+        )
+        save_log(f"[CRITICAL_TAMPER_ALERT] {alert_msg}")
+        return {
+            "success": False,
+            "tamper_detected": True,
+            "message": alert_msg,
+            "modified_files": [],
+            "deleted_files": [],
+            "new_files": [],
+            "text_differences": {},
+            "file_metadata": {},
+            "report_path": None,
+            "report_paths": [],
+            "monitor_results": [],
+            "auto_check": not generate_report,
+        }
+
     monitors = get_monitors()
     if not monitors:
         return {"success": False, "message": "No baseline found. Please create a baseline first."}

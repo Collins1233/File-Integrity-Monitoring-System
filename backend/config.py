@@ -35,6 +35,7 @@ WINDOW_TITLE = "File Integrity Monitoring System"
 BASELINE_FILE = os.path.join(PROJECT_ROOT, "baseline.json")
 BASELINE_FOLDER = os.path.join(PROJECT_ROOT, "baseline_files")
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, "settings.json")
+BASELINE_HMAC_KEY_FILE = os.path.join(PROJECT_ROOT, ".baseline_hmac.key")
 
 REPORT_FOLDER = os.path.join(PROJECT_ROOT, "reports")
 MAX_REPORTS_RETAINED = 5

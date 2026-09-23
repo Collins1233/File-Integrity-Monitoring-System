@@ -18,8 +18,6 @@ if not FRONTEND_DIST.is_dir():
 
 datas = [
     (str(FRONTEND_DIST), os.path.join("frontend", "dist")),
-    (str(BACKEND / "win_folder_picker.py"), "backend"),
-    (str(BACKEND / "win_file_picker.py"), "backend"),
 ]
 
 logo_png = ROOT / "frontend" / "public" / "fim-logo.png"
@@ -47,7 +45,7 @@ hiddenimports = [
     "PIL.Image",
 ]
 
-for package in ("uvicorn", "fastapi", "starlette", "anyio", "pydantic", "pystray"):
+for package in ("uvicorn", "fastapi", "starlette", "anyio", "pydantic", "pystray", "watchdog", "jwt"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_binaries
