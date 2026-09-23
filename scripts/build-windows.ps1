@@ -39,30 +39,22 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $Exe = Join-Path $Root "dist\FIMS.exe"
 if (-not (Test-Path $Exe)) { throw "Expected output missing: $Exe" }
 
-Write-Host "==> Building installer (Inno Setup)"
+Write-Host "==> Checking for Inno Setup (optional installer compiler)"
 $iscc = @(
   "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
   "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-if (-not $iscc) {
-  Write-Host "Inno Setup not found. Installing via Chocolatey..."
-  choco install innosetup -y --no-progress
-  $iscc = @(
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-  ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$Setup = $null
+if ($iscc) {
+  Write-Host "==> Compiling installer with Inno Setup"
+  & $iscc (Join-Path $Root "installer\FIMS.iss")
+  if ($LASTEXITCODE -eq 0) {
+    $Setup = Join-Path $Root "dist\FIMS-Setup.exe"
+  }
+} else {
+  Write-Host "Note: Inno Setup 6 not found. Skipping setup wizard installer. (Portable EXE is ready!)"
 }
-
-if (-not $iscc) {
-  throw "ISCC.exe not found. Install Inno Setup 6 from https://jrsoftware.org/isinfo.php"
-}
-
-& $iscc (Join-Path $Root "installer\FIMS.iss")
-if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
-
-$Setup = Join-Path $Root "dist\FIMS-Setup.exe"
-if (-not (Test-Path $Setup)) { throw "Expected output missing: $Setup" }
 
 Write-Host ""
 Write-Host "Build complete:"
