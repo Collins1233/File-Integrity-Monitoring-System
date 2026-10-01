@@ -17,6 +17,7 @@ export default function AppHeader({
   onToggleDarkMode,
   onStartTour,
   serverOnline = true,
+  isDemoMode = false,
   pendingAlertCount = 0,
   notificationPermission = 'default',
   onEnableNotifications,
@@ -42,10 +43,41 @@ export default function AppHeader({
       </div>
 
       <div className="top-bar-right">
-        <span
-          className={`top-bar-status-dot ${serverOnline ? 'online' : 'offline'}`}
-          title={serverOnline ? 'Server online' : 'Server offline'}
-        />
+        {isDemoMode ? (
+          <div
+            className="cloud-preview-pill"
+            title="Interactive Cloud Preview: displaying simulated enterprise integrity audit data."
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '3px 10px',
+              borderRadius: '999px',
+              background: 'rgba(56, 189, 248, 0.15)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              color: '#38bdf8',
+              fontSize: '11px',
+              fontWeight: 600,
+              userSelect: 'none',
+            }}
+          >
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: '#38bdf8',
+                boxShadow: '0 0 6px #38bdf8',
+              }}
+            />
+            <span>Cloud Preview</span>
+          </div>
+        ) : (
+          <span
+            className={`top-bar-status-dot ${serverOnline ? 'online' : 'offline'}`}
+            title={serverOnline ? 'Server online' : 'Server offline'}
+          />
+        )}
 
         <div className="top-bar-notifications">
           <button

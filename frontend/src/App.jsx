@@ -50,6 +50,7 @@ import {
   isNetworkError,
   API_CONNECTION_HELP,
   apiFetch,
+  isDemoActive,
   getStoredRole,
   setStoredRole,
   setStoredApiKey,
@@ -203,6 +204,7 @@ function App() {
   }, []);
 
   const markServerFailure = useCallback(() => {
+    if (isDemoActive()) return;
     if (busyRef.current) return;
     healthFailures.current += 1;
     if (healthFailures.current >= 2) {
@@ -427,6 +429,7 @@ function App() {
 
     async function boot() {
       await resolveApiBase();
+      if (isDemoActive()) markServerOnline();
       if (cancelled) return;
       await fetchStatus();
       if (cancelled) return;
@@ -849,13 +852,14 @@ function App() {
         onToggleDarkMode={() => setDarkMode((value) => !value)}
         onStartTour={() => setActiveTab('help')}
         serverOnline={serverOnline}
+        isDemoMode={isDemoActive()}
         pendingAlertCount={toasts.length || monitoring.pending_alert_count}
         notificationPermission={notificationPermission}
         onEnableNotifications={requestNotificationPermission}
         onDismissAlerts={dismissAllToasts}
       />
 
-      {!serverOnline && (
+      {!serverOnline && !isDemoActive() && (
         <div className="server-offline-banner">
           <strong>Monitoring server offline.</strong>{' '}
           {API_CONNECTION_HELP}
