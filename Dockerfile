@@ -3,7 +3,7 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY frontend/ ./
 RUN npm run build
@@ -28,9 +28,10 @@ COPY demo_files/ ./demo_files/
 # Copy compiled React frontend assets from Stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Default port
-ENV PORT=8000
-EXPOSE 8000
+# Ensure Python can find modules in /app/backend and /app
+ENV PYTHONPATH=/app/backend:/app
+ENV PORT=10000
+EXPOSE 10000
 
 # Launch server binding to all interfaces and cloud-provided PORT
-CMD ["sh", "-c", "uvicorn backend.server:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn server:app --app-dir backend --host 0.0.0.0 --port ${PORT:-10000}"]
