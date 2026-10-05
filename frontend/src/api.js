@@ -79,9 +79,17 @@ export function getAuthHeaders() {
 }
 
 export async function apiFetch(url, options = {}) {
-  const authHeaders = getAuthHeaders();
+  const apiKey = getStoredApiKey();
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const baseHeaders = {};
+  if (!isFormData) {
+    baseHeaders['Content-Type'] = 'application/json';
+  }
+  if (apiKey) {
+    baseHeaders['X-API-Key'] = apiKey;
+  }
   const mergedHeaders = {
-    ...authHeaders,
+    ...baseHeaders,
     ...(options.headers || {}),
   };
   return fetch(url, { ...options, headers: mergedHeaders });

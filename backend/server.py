@@ -11,10 +11,11 @@ import json
 import logging
 import asyncio
 import subprocess
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -539,6 +540,63 @@ def api_add_files_monitor(request: FilesRequest):
         return create_baseline_for_files(request.file_paths)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
+
+
+@app.post("/api/monitors/upload", dependencies=[Depends(require_analyst)])
+async def api_upload_monitor(
+    files: list[UploadFile] = File(...),
+    folder_name: Optional[str] = Form(None),
+    relative_paths: Optional[str] = Form(None),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files selected.")
+
+    rel_map = {}
+    if relative_paths:
+        try:
+            rel_map = json.loads(relative_paths)
+        except Exception:
+            rel_map = {}
+
+    raw_name = (folder_name or "").strip()
+    clean_name = re.sub(r'[^a-zA-Z0-9_\- ]', '_', raw_name)
+    if not clean_name:
+        clean_name = f"Uploaded_Folder_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    uploads_root = os.path.join(PROJECT_ROOT, "uploads")
+    target_dir = os.path.join(uploads_root, clean_name)
+    os.makedirs(target_dir, exist_ok=True)
+
+    saved_count = 0
+    for file in files:
+        filename = file.filename or f"file_{saved_count + 1}"
+        rel_path = rel_map.get(filename, filename).lstrip("/\\")
+        dest_path = os.path.abspath(os.path.join(target_dir, rel_path))
+
+        if not dest_path.startswith(os.path.abspath(target_dir)):
+            dest_path = os.path.join(target_dir, os.path.basename(filename))
+
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        content = await file.read()
+        with open(dest_path, "wb") as f:
+            f.write(content)
+        saved_count += 1
+
+    return create_baseline_for_folder(target_dir)
+
+
+@app.post("/api/files/simulate-tamper", dependencies=[Depends(require_analyst)])
+async def api_simulate_tamper(request: RestoreFileRequest):
+    """Quickly append a tamper marker to test detection, unified diffs, and alerts."""
+    path = request.path
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found.")
+    try:
+        with open(path, "a", encoding="utf-8", errors="ignore") as f:
+            f.write(f"\n# [TEST MODIFICATION] Modified at {datetime.now().strftime('%H:%M:%S')}\n")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to modify file: {e}")
+    return {"success": True, "message": f"Modified {os.path.basename(path)}. Run 'Check Now' or wait for Watchdog auto-detect."}
 
 
 @app.post("/api/select-files", dependencies=[Depends(require_analyst)])

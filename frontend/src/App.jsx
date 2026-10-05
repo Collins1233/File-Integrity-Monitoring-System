@@ -24,7 +24,9 @@ import {
   Eye,
   HelpCircle,
   FileStack,
-  Plus
+  Plus,
+  Laptop,
+  Upload
 } from 'lucide-react';
 
 import FileChangeViewer from './FileChangeViewer';
@@ -165,6 +167,8 @@ function App() {
   const seenAlertIds = useRef(new Set());
   const devSessionRef = useRef(sessionStorage.getItem(DEV_SESSION_KEY) || '');
   const healthFailures = useRef(0);
+  const folderPickerRef = useRef(null);
+  const filesPickerRef = useRef(null);
 
   const handleRoleChange = (newRole) => {
     setStoredRole(newRole);
@@ -555,6 +559,117 @@ function App() {
       addConsoleLog(`Error adding files: ${err.message}`, 'danger');
     } finally {
       setFolderLoading(false);
+    }
+  };
+
+  const handleDeviceFolderPick = () => {
+    folderPickerRef.current?.click();
+  };
+
+  const handleDeviceFilesPick = () => {
+    filesPickerRef.current?.click();
+  };
+
+  const handleDeviceFolderSelected = async (e) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    const folderName = files[0]?.webkitRelativePath?.split('/')[0] || 'MyDeviceFolder';
+
+    setFolderLoading(true);
+    addConsoleLog(`Uploading folder "${folderName}" (${files.length} file(s)) from your device…`, 'info');
+
+    try {
+      const formData = new FormData();
+      formData.append('folder_name', folderName);
+      const relMap = {};
+      files.forEach((file) => {
+        formData.append('files', file);
+        relMap[file.name] = file.webkitRelativePath || file.name;
+      });
+      formData.append('relative_paths', JSON.stringify(relMap));
+
+      const res = await apiFetch(`${API_BASE}/api/monitors/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addConsoleLog(`Folder baseline established: ${data.folder_path}`, 'success');
+        addConsoleLog(`${data.file_count} file(s) hashed with SHA-256 and signed with HMAC-SHA256.`, 'success');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      } else {
+        const msg = formatApiError(data.detail, 'Failed to upload folder');
+        addConsoleLog(`Could not upload folder: ${msg}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error uploading folder: ${err.message}`, 'danger');
+    } finally {
+      setFolderLoading(false);
+      if (folderPickerRef.current) folderPickerRef.current.value = '';
+    }
+  };
+
+  const handleDeviceFilesSelected = async (e) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    setFolderLoading(true);
+    addConsoleLog(`Uploading ${files.length} file(s) from your device…`, 'info');
+
+    try {
+      const formData = new FormData();
+      formData.append('folder_name', 'Device_Files');
+      files.forEach((file) => {
+        formData.append('files', file);
+      });
+
+      const res = await apiFetch(`${API_BASE}/api/monitors/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addConsoleLog(`Files baseline established: ${data.folder_path}`, 'success');
+        addConsoleLog(`${data.file_count} file(s) hashed with SHA-256 and signed with HMAC-SHA256.`, 'success');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      } else {
+        const msg = formatApiError(data.detail, 'Failed to upload files');
+        addConsoleLog(`Could not upload files: ${msg}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error uploading files: ${err.message}`, 'danger');
+    } finally {
+      setFolderLoading(false);
+      if (filesPickerRef.current) filesPickerRef.current.value = '';
+    }
+  };
+
+  const handleSimulateTamper = async (path) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/files/simulate-tamper`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const fname = path.split(/[\\/]/).pop();
+        addConsoleLog(`Injected test modification into ${fname}. Run 'Check Now' to inspect diff!`, 'warning');
+        addToast({
+          id: Date.now(),
+          type: 'warning',
+          title: 'Test Modification Injected',
+          message: `Modified ${fname} on disk. Click "Check Now" to review changes.`,
+        });
+      }
+    } catch (err) {
+      addConsoleLog(`Error modifying file: ${err.message}`, 'danger');
     }
   };
 
@@ -1057,21 +1172,33 @@ function App() {
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                       <button
                         className="btn btn-primary"
-                        onClick={handleSelectFolder}
+                        onClick={handleDeviceFolderPick}
                         disabled={folderLoading}
-                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                        style={{ fontSize: '0.95rem', padding: '0.9rem 1.4rem', gap: '0.6rem' }}
+                        title="Pick and upload an entire folder from your computer/device"
                       >
-                        <Folder size={20} />
-                        {folderLoading ? 'Adding…' : 'Add Folder'}
+                        <Laptop size={19} />
+                        {folderLoading ? 'Uploading…' : '📁 Upload Folder from Device'}
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleDeviceFilesPick}
+                        disabled={folderLoading}
+                        style={{ fontSize: '0.95rem', padding: '0.9rem 1.4rem', gap: '0.6rem' }}
+                        title="Pick and upload specific files from your computer/device"
+                      >
+                        <Upload size={19} />
+                        {folderLoading ? 'Uploading…' : '📄 Upload Files from Device'}
                       </button>
                       <button
                         className="btn btn-secondary"
-                        onClick={handleSelectFiles}
+                        onClick={handleSelectFolder}
                         disabled={folderLoading}
-                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                        style={{ fontSize: '0.9rem', padding: '0.9rem 1.2rem', gap: '0.5rem' }}
+                        title="Browse server folders or presets (Demo Files)"
                       >
-                        <FileStack size={20} />
-                        Add Files
+                        <Folder size={18} />
+                        Browse Server Presets
                       </button>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '480px' }}>
@@ -1139,13 +1266,17 @@ function App() {
                         <Files size={16} />
                         View Files
                       </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading}>
-                        <Folder size={16} />
-                        {folderLoading ? 'Adding…' : 'Add Folder'}
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleDeviceFolderPick} disabled={folderLoading} title="Upload folder from device">
+                        <Laptop size={16} />
+                        {folderLoading ? 'Uploading…' : 'Upload Folder'}
                       </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFiles} disabled={folderLoading}>
-                        <FileStack size={16} />
-                        Add Files
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleDeviceFilesPick} disabled={folderLoading} title="Upload files from device">
+                        <Upload size={16} />
+                        Upload Files
+                      </button>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading} title="Browse server presets">
+                        <Folder size={16} />
+                        Server Presets
                       </button>
                     </div>
 
@@ -1207,6 +1338,23 @@ function App() {
                 </div>
               </div>
             </section>
+
+            <input
+              type="file"
+              ref={folderPickerRef}
+              webkitdirectory="true"
+              directory="true"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleDeviceFolderSelected}
+            />
+            <input
+              type="file"
+              ref={filesPickerRef}
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleDeviceFilesSelected}
+            />
 
             {/* User Friendly Status Card */}
             <section className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
@@ -1382,6 +1530,7 @@ function App() {
             onSelectMonitor={handleSelectMonitor}
             loading={filesLoading}
             onRestore={handleRestoreFile}
+            onSimulateTamper={handleSimulateTamper}
           />
         )}
 

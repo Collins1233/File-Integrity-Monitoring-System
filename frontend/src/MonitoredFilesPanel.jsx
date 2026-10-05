@@ -13,6 +13,7 @@ import {
   Search,
   Eye,
   X,
+  Zap,
 } from 'lucide-react';
 
 import { API_BASE } from './api';
@@ -45,7 +46,7 @@ function monitorLabel(monitor) {
   return monitor.folder_path.split('/').filter(Boolean).pop() || monitor.folder_path;
 }
 
-function FileDetailPanel({ file, onClose, onRestore }) {
+function FileDetailPanel({ file, onClose, onRestore, onSimulateTamper }) {
   const [previewTab, setPreviewTab] = useState('baseline');
   const [previews, setPreviews] = useState({ baseline: null, current: null });
   const [loading, setLoading] = useState(false);
@@ -108,11 +109,22 @@ function FileDetailPanel({ file, onClose, onRestore }) {
         <p className="monitored-file-note">Large file monitored by hash only. Full text snapshot was skipped.</p>
       )}
 
-      {file.has_backup && (
-        <button type="button" className="btn btn-secondary" onClick={() => onRestore?.(file.path)}>
-          <RotateCcw size={14} /> Restore from baseline backup
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0' }}>
+        {file.has_backup && (
+          <button type="button" className="btn btn-secondary" onClick={() => onRestore?.(file.path)}>
+            <RotateCcw size={14} /> Restore from baseline backup
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: '#f59e0b' }}
+          onClick={() => onSimulateTamper?.(file.path)}
+          title="Appends a test modification to this file to test integrity detection and diff viewing"
+        >
+          <Zap size={14} /> Test Modification / Tamper
         </button>
-      )}
+      </div>
 
       {loading && <p className="monitored-file-loading">Loading preview…</p>}
 
@@ -166,6 +178,7 @@ export default function MonitoredFilesPanel({
   onSelectMonitor,
   loading,
   onRestore,
+  onSimulateTamper,
 }) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -277,6 +290,7 @@ export default function MonitoredFilesPanel({
           file={selectedFile}
           onClose={() => setSelectedFile(null)}
           onRestore={onRestore}
+          onSimulateTamper={onSimulateTamper}
         />
       )}
     </section>
