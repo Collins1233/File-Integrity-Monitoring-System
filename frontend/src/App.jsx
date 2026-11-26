@@ -485,12 +485,15 @@ function App() {
 
   // Actions
   const handleSelectFolder = () => {
-    setBrowserModalMode('folder');
-    setBrowserModalOpen(true);
+    handleDeviceFolderPick();
   };
 
   const handleSelectFiles = () => {
-    setBrowserModalMode('files');
+    handleDeviceFilesPick();
+  };
+
+  const handleOpenServerBrowser = (mode = 'folder') => {
+    setBrowserModalMode(mode);
     setBrowserModalOpen(true);
   };
 
@@ -1172,33 +1175,33 @@ function App() {
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                       <button
                         className="btn btn-primary"
-                        onClick={handleDeviceFolderPick}
+                        onClick={handleSelectFolder}
                         disabled={folderLoading}
-                        style={{ fontSize: '0.95rem', padding: '0.9rem 1.4rem', gap: '0.6rem' }}
-                        title="Pick and upload an entire folder from your computer/device"
+                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                        title="Open File Explorer to select a folder from your computer"
                       >
-                        <Laptop size={19} />
-                        {folderLoading ? 'Uploading…' : '📁 Upload Folder from Device'}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleDeviceFilesPick}
-                        disabled={folderLoading}
-                        style={{ fontSize: '0.95rem', padding: '0.9rem 1.4rem', gap: '0.6rem' }}
-                        title="Pick and upload specific files from your computer/device"
-                      >
-                        <Upload size={19} />
-                        {folderLoading ? 'Uploading…' : '📄 Upload Files from Device'}
+                        <Folder size={20} />
+                        {folderLoading ? 'Adding…' : 'Add Folder'}
                       </button>
                       <button
                         className="btn btn-secondary"
-                        onClick={handleSelectFolder}
+                        onClick={handleSelectFiles}
                         disabled={folderLoading}
-                        style={{ fontSize: '0.9rem', padding: '0.9rem 1.2rem', gap: '0.5rem' }}
-                        title="Browse server folders or presets (Demo Files)"
+                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
+                        title="Open File Explorer to select specific files from your computer"
                       >
-                        <Folder size={18} />
-                        Browse Server Presets
+                        <FileStack size={20} />
+                        Add Files
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => handleOpenServerBrowser('folder')}
+                        disabled={folderLoading}
+                        style={{ fontSize: '0.9rem', padding: '0.95rem 1.35rem', gap: '0.5rem' }}
+                        title="Browse server demo presets (e.g. Demo Test Files)"
+                      >
+                        <HardDrive size={18} />
+                        Server Presets
                       </button>
                     </div>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '480px' }}>
@@ -1266,16 +1269,16 @@ function App() {
                         <Files size={16} />
                         View Files
                       </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleDeviceFolderPick} disabled={folderLoading} title="Upload folder from device">
-                        <Laptop size={16} />
-                        {folderLoading ? 'Uploading…' : 'Upload Folder'}
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleDeviceFilesPick} disabled={folderLoading} title="Upload files from device">
-                        <Upload size={16} />
-                        Upload Files
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading} title="Browse server presets">
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading} title="Open File Explorer to select a folder from your computer">
                         <Folder size={16} />
+                        {folderLoading ? 'Adding…' : 'Add Folder'}
+                      </button>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFiles} disabled={folderLoading} title="Open File Explorer to select files from your computer">
+                        <FileStack size={16} />
+                        Add Files
+                      </button>
+                      <button className="btn btn-secondary btn-action-secondary" onClick={() => handleOpenServerBrowser('folder')} disabled={folderLoading} title="Browse server presets (e.g. Demo Test Files)">
+                        <HardDrive size={16} />
                         Server Presets
                       </button>
                     </div>
