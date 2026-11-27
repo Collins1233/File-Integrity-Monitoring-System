@@ -109,6 +109,16 @@ class RestoreFileRequest(BaseModel):
     path: str
     monitor_id: Optional[str] = None
 
+class SaveFileContentRequest(BaseModel):
+    path: str
+    content: str
+    monitor_id: Optional[str] = None
+
+class SimulateScenarioRequest(BaseModel):
+    scenario: str  # "modify", "ransomware", "rogue_file", "delete"
+    path: Optional[str] = None
+    monitor_id: Optional[str] = None
+
 class AcceptBaselineRequest(BaseModel):
     monitor_id: Optional[str] = None
 
@@ -596,7 +606,147 @@ async def api_simulate_tamper(request: RestoreFileRequest):
             f.write(f"\n# [TEST MODIFICATION] Modified at {datetime.now().strftime('%H:%M:%S')}\n")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to modify file: {e}")
+    save_log(f"SIMULATED TAMPER: Appended test modification to {os.path.basename(path)}")
     return {"success": True, "message": f"Modified {os.path.basename(path)}. Run 'Check Now' or wait for Watchdog auto-detect."}
+
+
+@app.get("/api/files/text", dependencies=[Depends(require_analyst)])
+def api_get_file_text(path: str, monitor_id: Optional[str] = None):
+    """Retrieve raw text of a monitored file for in-browser viewing and editing."""
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found.")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {
+            "success": True,
+            "path": path,
+            "filename": os.path.basename(path),
+            "content": content,
+            "size": os.path.getsize(path),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
+
+
+@app.post("/api/files/save", dependencies=[Depends(require_analyst)])
+async def api_save_file_content(request: SaveFileContentRequest):
+    """Save edited content to a monitored file directly from the browser."""
+    path = request.path
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found on disk.")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(request.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+    save_log(f"IN-BROWSER EDIT: Saved modifications to {os.path.basename(path)}")
+    return {
+        "success": True,
+        "message": f"Saved changes to {os.path.basename(path)}.",
+        "path": path,
+        "filename": os.path.basename(path),
+    }
+
+
+@app.post("/api/files/simulate-scenario", dependencies=[Depends(require_analyst)])
+async def api_simulate_scenario(request: SimulateScenarioRequest):
+    """Simulate realistic security scenarios: modify, ransomware, rogue file, delete."""
+    monitors = get_monitors()
+    if not monitors:
+        raise HTTPException(status_code=400, detail="No active baseline or monitor found. Please add a folder or select server presets first.")
+
+    monitor = get_active_monitor() if not request.monitor_id else next((m for m in monitors if m["id"] == request.monitor_id), None)
+    if not monitor:
+        monitor = monitors[0]
+
+    target_path = request.path
+    files_dict = monitor.get("files", {})
+
+    # If no path provided, pick a suitable monitored file
+    if not target_path or not os.path.exists(target_path):
+        available_files = [p for p in files_dict.keys() if os.path.isfile(p)]
+        if not available_files and request.scenario != "rogue_file":
+            raise HTTPException(status_code=404, detail="No monitored files found on disk to simulate on.")
+        if available_files:
+            target_path = available_files[0]
+
+    scenario = (request.scenario or "modify").lower()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if scenario == "modify":
+        try:
+            with open(target_path, "a", encoding="utf-8", errors="ignore") as f:
+                f.write(f"\n# [UNAUTHORIZED EDIT] Tampered at {timestamp}\n")
+            save_log(f"SIMULATED ATTACK: Injected unauthorized modification into {os.path.basename(target_path)}")
+            return {
+                "success": True,
+                "scenario": "modify",
+                "affected_file": os.path.basename(target_path),
+                "path": target_path,
+                "message": f"Injected unauthorized edit into {os.path.basename(target_path)}. Run 'Check Now' to inspect diff!"
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to modify file: {e}")
+
+    elif scenario == "ransomware":
+        try:
+            with open(target_path, "a", encoding="utf-8", errors="ignore") as f:
+                f.write(f"\n=== ENCRYPTED_BY_SIMULATED_RANSOMWARE ===\n[PAYLOAD_CIPHERTEXT::0x8f4d9a3b_{int(datetime.now().timestamp())}]\n")
+            save_log(f"SIMULATED ATTACK: Injected ransomware payload into {os.path.basename(target_path)}")
+            return {
+                "success": True,
+                "scenario": "ransomware",
+                "affected_file": os.path.basename(target_path),
+                "path": target_path,
+                "message": f"Simulated ransomware payload appended to {os.path.basename(target_path)}."
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to inject payload: {e}")
+
+    elif scenario == "rogue_file":
+        folder_dir = monitor.get("folder_path")
+        if not folder_dir or not os.path.isdir(folder_dir):
+            if target_path:
+                folder_dir = os.path.dirname(target_path)
+            elif files_dict:
+                folder_dir = os.path.dirname(list(files_dict.keys())[0])
+            else:
+                folder_dir = "."
+
+        rogue_filename = "unauthorized_backdoor.sh"
+        rogue_path = os.path.join(folder_dir, rogue_filename)
+        try:
+            with open(rogue_path, "w", encoding="utf-8") as f:
+                f.write(f"#!/bin/bash\n# Unauthorized Rogue Script created at {timestamp}\necho 'Attacker execution simulation'\n")
+            save_log(f"SIMULATED ATTACK: Created unauthorized rogue file {rogue_filename}")
+            return {
+                "success": True,
+                "scenario": "rogue_file",
+                "affected_file": rogue_filename,
+                "path": rogue_path,
+                "message": f"Created unauthorized new file '{rogue_filename}'. Run 'Check Now' to detect new file alert!"
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create rogue file: {e}")
+
+    elif scenario == "delete":
+        try:
+            os.remove(target_path)
+            save_log(f"SIMULATED ATTACK: Maliciously deleted file {os.path.basename(target_path)}")
+            return {
+                "success": True,
+                "scenario": "delete",
+                "affected_file": os.path.basename(target_path),
+                "path": target_path,
+                "message": f"Deleted {os.path.basename(target_path)} from disk. Run 'Check Now' to trigger missing file alert!"
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario: {scenario}. Available: modify, ransomware, rogue_file, delete")
 
 
 @app.post("/api/select-files", dependencies=[Depends(require_analyst)])

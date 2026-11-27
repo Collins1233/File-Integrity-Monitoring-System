@@ -14,6 +14,7 @@ import {
   Eye,
   X,
   Zap,
+  Edit3,
 } from 'lucide-react';
 
 import { API_BASE } from './api';
@@ -46,7 +47,7 @@ function monitorLabel(monitor) {
   return monitor.folder_path.split('/').filter(Boolean).pop() || monitor.folder_path;
 }
 
-function FileDetailPanel({ file, onClose, onRestore, onSimulateTamper }) {
+function FileDetailPanel({ file, onClose, onRestore, onSimulateTamper, onOpenEditor }) {
   const [previewTab, setPreviewTab] = useState('baseline');
   const [previews, setPreviews] = useState({ baseline: null, current: null });
   const [loading, setLoading] = useState(false);
@@ -110,6 +111,15 @@ function FileDetailPanel({ file, onClose, onRestore, onSimulateTamper }) {
       )}
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0' }}>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ borderColor: 'rgba(59, 130, 246, 0.4)', color: '#60a5fa' }}
+          onClick={() => onOpenEditor?.(file.path)}
+          title="Open live in-browser editor to view or edit this file directly"
+        >
+          <Edit3 size={14} /> ✏️ Edit in Browser
+        </button>
         {file.has_backup && (
           <button type="button" className="btn btn-secondary" onClick={() => onRestore?.(file.path)}>
             <RotateCcw size={14} /> Restore from baseline backup
@@ -179,6 +189,7 @@ export default function MonitoredFilesPanel({
   loading,
   onRestore,
   onSimulateTamper,
+  onOpenEditor,
 }) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -291,6 +302,7 @@ export default function MonitoredFilesPanel({
           onClose={() => setSelectedFile(null)}
           onRestore={onRestore}
           onSimulateTamper={onSimulateTamper}
+          onOpenEditor={onOpenEditor}
         />
       )}
     </section>

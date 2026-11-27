@@ -41,6 +41,8 @@ import HelpTour from './HelpTour';
 import AppHeader from './AppHeader';
 import ConfirmDialog from './ConfirmDialog';
 import DirectoryBrowserModal from './DirectoryBrowserModal';
+import FileEditorModal from './FileEditorModal';
+import AttackSimulatorToolbar from './AttackSimulatorToolbar';
 import {
   formatAlertTitle,
   getAffectedFiles,
@@ -189,6 +191,8 @@ function App() {
   const [confirmState, setConfirmState] = useState(null);
   const [browserModalOpen, setBrowserModalOpen] = useState(false);
   const [browserModalMode, setBrowserModalMode] = useState('folder');
+  const [editorModalOpen, setEditorModalOpen] = useState(false);
+  const [editorFilePath, setEditorFilePath] = useState(null);
 
   const requestConfirm = useCallback((options) => new Promise((resolve) => {
     confirmResolver.current = resolve;
@@ -673,6 +677,41 @@ function App() {
       }
     } catch (err) {
       addConsoleLog(`Error modifying file: ${err.message}`, 'danger');
+    }
+  };
+
+  const handleOpenEditor = (filePath) => {
+    if (!filePath) {
+      if (monitoredFiles && monitoredFiles.length > 0) {
+        filePath = monitoredFiles[0].path;
+      } else {
+        addToast({
+          id: Date.now(),
+          type: 'warning',
+          title: 'No file selected',
+          message: 'Please select a file to edit or monitor a folder first.',
+        });
+        return;
+      }
+    }
+    setEditorFilePath(filePath);
+    setEditorModalOpen(true);
+  };
+
+  const handleEditorSaved = async (filePath, checkImmediately, message) => {
+    const fname = filePath.split(/[\\/]/).pop();
+    addConsoleLog(`[EDITOR] Saved changes to ${fname}`, 'warning');
+    addToast({
+      id: Date.now(),
+      type: 'success',
+      title: 'File Saved in Browser',
+      message: message || `Saved changes to ${fname}.`,
+    });
+    await fetchFiles(activeMonitorId);
+    if (checkImmediately) {
+      setTimeout(() => {
+        handleCheckNow();
+      }, 400);
     }
   };
 
@@ -1359,6 +1398,21 @@ function App() {
               onChange={handleDeviceFilesSelected}
             />
 
+            {status.has_baseline && (
+              <AttackSimulatorToolbar
+                apiBase={API_BASE}
+                apiFetch={apiFetch}
+                monitors={monitors}
+                activeMonitorId={activeMonitorId}
+                monitoredFiles={monitoredFiles}
+                onOpenEditor={handleOpenEditor}
+                onCheckNow={handleCheckNow}
+                addConsoleLog={addConsoleLog}
+                addToast={addToast}
+                refreshState={() => refreshMonitorState(activeMonitorId)}
+              />
+            )}
+
             {/* User Friendly Status Card */}
             <section className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
@@ -1534,6 +1588,7 @@ function App() {
             loading={filesLoading}
             onRestore={handleRestoreFile}
             onSimulateTamper={handleSimulateTamper}
+            onOpenEditor={handleOpenEditor}
           />
         )}
 
@@ -1671,6 +1726,18 @@ function App() {
         onClose={() => setBrowserModalOpen(false)}
         onSelectFolder={handleFolderBrowserSelect}
         onSelectFiles={handleFilesBrowserSelect}
+      />
+
+      <FileEditorModal
+        open={editorModalOpen}
+        filePath={editorFilePath}
+        apiBase={API_BASE}
+        apiFetch={apiFetch}
+        onClose={() => {
+          setEditorModalOpen(false);
+          setEditorFilePath(null);
+        }}
+        onSaved={handleEditorSaved}
       />
     </div>
   );
