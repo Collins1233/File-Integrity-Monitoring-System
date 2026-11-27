@@ -601,9 +601,17 @@ async def api_simulate_tamper(request: RestoreFileRequest):
     path = request.path
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="File not found.")
+    ext = os.path.splitext(path)[1].lower()
+    timestamp = datetime.now().strftime("%H:%M:%S")
     try:
-        with open(path, "a", encoding="utf-8", errors="ignore") as f:
-            f.write(f"\n# [TEST MODIFICATION] Modified at {datetime.now().strftime('%H:%M:%S')}\n")
+        if ext == ".docx":
+            from docx import Document
+            doc = Document(path)
+            doc.add_paragraph(f"[TEST MODIFICATION] Modified at {timestamp}")
+            doc.save(path)
+        else:
+            with open(path, "a", encoding="utf-8", errors="ignore") as f:
+                f.write(f"\n# [TEST MODIFICATION] Modified at {timestamp}\n")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to modify file: {e}")
     save_log(f"SIMULATED TAMPER: Appended test modification to {os.path.basename(path)}")
@@ -612,9 +620,48 @@ async def api_simulate_tamper(request: RestoreFileRequest):
 
 @app.get("/api/files/text", dependencies=[Depends(require_analyst)])
 def api_get_file_text(path: str, monitor_id: Optional[str] = None):
-    """Retrieve raw text of a monitored file for in-browser viewing and editing."""
+    """Retrieve readable text of a monitored file (including Word .docx, PDF, text, code) for in-browser viewing and editing."""
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="File not found.")
+    
+    ext = os.path.splitext(path)[1].lower()
+
+    # Handle Word Document (.docx)
+    if ext == ".docx":
+        from file_preview import extract_preview_text
+        content = extract_preview_text(path, ext)
+        return {
+            "success": True,
+            "path": path,
+            "filename": os.path.basename(path),
+            "content": content or "(Empty Word Document)",
+            "size": os.path.getsize(path),
+            "file_type": "docx",
+            "is_word": True,
+        }
+
+    # Handle other documents (.pdf, .pptx, .xlsx, .rtf)
+    if ext in [".pdf", ".pptx", ".xlsx", ".rtf"]:
+        from file_preview import extract_preview_text
+        content = extract_preview_text(path, ext)
+        return {
+            "success": True,
+            "path": path,
+            "filename": os.path.basename(path),
+            "content": content or f"(No extractable text found in this {ext} file)",
+            "size": os.path.getsize(path),
+            "file_type": ext.lstrip("."),
+            "read_only": True,
+        }
+
+    # Binary images
+    if ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{os.path.basename(path)}' is an image/binary file. Use '⚡ 1-Click Tamper' to test integrity detection on this file.",
+        )
+
+    # Standard text/code/config files
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -624,6 +671,7 @@ def api_get_file_text(path: str, monitor_id: Optional[str] = None):
             "filename": os.path.basename(path),
             "content": content,
             "size": os.path.getsize(path),
+            "file_type": "text",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
@@ -631,15 +679,33 @@ def api_get_file_text(path: str, monitor_id: Optional[str] = None):
 
 @app.post("/api/files/save", dependencies=[Depends(require_analyst)])
 async def api_save_file_content(request: SaveFileContentRequest):
-    """Save edited content to a monitored file directly from the browser."""
+    """Save edited content to a monitored file directly from the browser (supports text & Word .docx)."""
     path = request.path
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="File not found on disk.")
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(request.content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext == ".docx":
+        try:
+            from docx import Document
+            try:
+                doc = Document(path)
+                for p in list(doc.paragraphs):
+                    p._element.getparent().remove(p._element)
+            except Exception:
+                doc = Document()
+            for line in request.content.splitlines():
+                doc.add_paragraph(line)
+            doc.save(path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save Word document: {e}")
+    else:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(request.content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
 
     save_log(f"IN-BROWSER EDIT: Saved modifications to {os.path.basename(path)}")
     return {
@@ -676,9 +742,16 @@ async def api_simulate_scenario(request: SimulateScenarioRequest):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if scenario == "modify":
+        ext = os.path.splitext(target_path)[1].lower() if target_path else ""
         try:
-            with open(target_path, "a", encoding="utf-8", errors="ignore") as f:
-                f.write(f"\n# [UNAUTHORIZED EDIT] Tampered at {timestamp}\n")
+            if ext == ".docx":
+                from docx import Document
+                doc = Document(target_path)
+                doc.add_paragraph(f"[UNAUTHORIZED EDIT] Tampered at {timestamp}")
+                doc.save(target_path)
+            else:
+                with open(target_path, "a", encoding="utf-8", errors="ignore") as f:
+                    f.write(f"\n# [UNAUTHORIZED EDIT] Tampered at {timestamp}\n")
             save_log(f"SIMULATED ATTACK: Injected unauthorized modification into {os.path.basename(target_path)}")
             return {
                 "success": True,

@@ -8,7 +8,8 @@ import {
   Check,
   AlertTriangle,
   Code,
-  Sparkles,
+  FileCheck,
+  Layers,
 } from 'lucide-react';
 
 export default function FileEditorModal({
@@ -22,6 +23,9 @@ export default function FileEditorModal({
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [filename, setFilename] = useState('');
+  const [fileType, setFileType] = useState('text');
+  const [isWord, setIsWord] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -45,6 +49,9 @@ export default function FileEditorModal({
           setContent(data.content || '');
           setOriginalContent(data.content || '');
           setFilename(data.filename || filePath.split(/[\\/]/).pop());
+          setFileType(data.file_type || 'text');
+          setIsWord(Boolean(data.is_word));
+          setReadOnly(Boolean(data.read_only));
         } else {
           setError(data.detail || 'Failed to load file content.');
         }
@@ -64,6 +71,7 @@ export default function FileEditorModal({
 
   // Support Tab key inside the editor textarea
   const handleKeyDown = (e) => {
+    if (readOnly) return;
     if (e.key === 'Tab') {
       e.preventDefault();
       const start = e.target.selectionStart;
@@ -81,8 +89,13 @@ export default function FileEditorModal({
 
   const handleAppendTamperMarker = () => {
     const time = new Date().toLocaleTimeString();
-    const marker = `\n# [UNAUTHORIZED EDIT] Injected in browser editor at ${time}\nATTACK_SIMULATION_FLAG=true\n`;
-    setContent((prev) => prev + marker);
+    if (isWord) {
+      const marker = `\n[UNAUTHORIZED EDIT] Modified in browser at ${time}\nIntegrity violation test paragraph.\n`;
+      setContent((prev) => prev + marker);
+    } else {
+      const marker = `\n# [UNAUTHORIZED EDIT] Injected in browser editor at ${time}\nATTACK_SIMULATION_FLAG=true\n`;
+      setContent((prev) => prev + marker);
+    }
   };
 
   const handleReset = () => {
@@ -117,11 +130,36 @@ export default function FileEditorModal({
     }
   };
 
+  const handleDirectTamper = async () => {
+    setSaving(true);
+    try {
+      const fetchFn = apiFetch || fetch;
+      const res = await fetchFn(`${apiBase}/api/files/simulate-tamper`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (onSaved) {
+          onSaved(filePath, true, data.message);
+        }
+        onClose();
+      } else {
+        setError(data.detail || 'Failed to tamper file.');
+      }
+    } catch (err) {
+      setError(err.message || 'Error executing tamper.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
 
   const hasChanges = content !== originalContent;
-  const lineCount = content.split('\n').length;
-  const charCount = content.length;
+  const lineCount = content ? content.split('\n').length : 0;
+  const charCount = content ? content.length : 0;
 
   return (
     <div className="confirm-overlay" onClick={onClose} role="presentation" style={{ zIndex: 1200 }}>
@@ -161,20 +199,36 @@ export default function FileEditorModal({
                 width: '42px',
                 height: '42px',
                 borderRadius: '10px',
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                color: 'var(--color-primary, #3b82f6)',
+                backgroundColor: isWord ? 'rgba(37, 99, 235, 0.18)' : 'rgba(59, 130, 246, 0.12)',
+                color: isWord ? '#3b82f6' : 'var(--color-primary, #3b82f6)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Code size={22} />
+              {isWord ? <FileText size={22} /> : <Code size={22} />}
             </div>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
                 <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 600 }}>
                   {filename || 'File Editor'}
                 </h3>
+
+                {isWord && (
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                      color: '#60a5fa',
+                      fontWeight: 600,
+                    }}
+                  >
+                    📄 Word Document (.docx)
+                  </span>
+                )}
+
                 {hasChanges ? (
                   <span
                     style={{
@@ -215,7 +269,7 @@ export default function FileEditorModal({
                 }}
                 title={filePath}
               >
-                {filePath}
+                {isWord ? 'Extracted readable document text. Edits are saved back into Word (.docx) format.' : filePath}
               </p>
             </div>
           </div>
@@ -244,22 +298,42 @@ export default function FileEditorModal({
           }}
         >
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {!readOnly && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleAppendTamperMarker}
+                style={{
+                  fontSize: '0.82rem',
+                  padding: '0.35rem 0.75rem',
+                  color: '#f59e0b',
+                  borderColor: 'rgba(245, 158, 11, 0.4)',
+                  gap: '0.4rem',
+                }}
+                title="Quickly append an unauthorized edit marker to test detection"
+              >
+                <Zap size={14} /> Inject Tamper Marker
+              </button>
+            )}
+
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={handleAppendTamperMarker}
+              onClick={handleDirectTamper}
+              disabled={saving}
               style={{
                 fontSize: '0.82rem',
                 padding: '0.35rem 0.75rem',
-                color: '#f59e0b',
-                borderColor: 'rgba(245, 158, 11, 0.4)',
+                color: '#f87171',
+                borderColor: 'rgba(239, 68, 68, 0.35)',
                 gap: '0.4rem',
               }}
-              title="Quickly append an unauthorized edit marker to test detection"
+              title="Instantly inject a test modification on disk and run integrity check"
             >
-              <Zap size={14} /> Inject Tamper Marker
+              <Zap size={14} /> ⚡ 1-Click Tamper & Scan
             </button>
-            {hasChanges && (
+
+            {hasChanges && !readOnly && (
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -273,7 +347,7 @@ export default function FileEditorModal({
           </div>
 
           <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            {lineCount} lines • {charCount} chars • UTF-8
+            {lineCount} lines • {charCount} chars • {isWord ? 'Microsoft Word (.docx)' : 'UTF-8'}
           </div>
         </div>
 
@@ -281,19 +355,28 @@ export default function FileEditorModal({
         <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {loading ? (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-              Loading file contents…
+              Loading document text…
             </div>
           ) : error ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-danger)' }}>
               <AlertTriangle size={32} style={{ marginBottom: '0.5rem' }} />
               <p>{error}</p>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleDirectTamper}
+                style={{ marginTop: '1rem', gap: '0.5rem', color: '#f59e0b' }}
+              >
+                <Zap size={16} /> Run 1-Click Tamper on this file instead
+              </button>
             </div>
           ) : (
             <textarea
               ref={textareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => !readOnly && setContent(e.target.value)}
               onKeyDown={handleKeyDown}
+              readOnly={readOnly}
               spellCheck={false}
               style={{
                 flex: 1,
@@ -304,12 +387,12 @@ export default function FileEditorModal({
                 border: 'none',
                 outline: 'none',
                 resize: 'none',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                fontSize: '0.925rem',
+                fontFamily: isWord ? 'system-ui, -apple-system, sans-serif' : 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                fontSize: '0.95rem',
                 lineHeight: 1.6,
                 tabSize: 2,
               }}
-              placeholder="File is empty. Type content here…"
+              placeholder="Document is empty…"
             />
           )}
         </div>
@@ -326,7 +409,7 @@ export default function FileEditorModal({
           }}
         >
           <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-            Changes are saved directly to the monitored file on the server.
+            {isWord ? 'Edits are saved directly into the Word document on disk.' : 'Changes are saved directly to the monitored file on the server.'}
           </span>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -339,27 +422,31 @@ export default function FileEditorModal({
             >
               Cancel
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => handleSave(false)}
-              disabled={saving || !hasChanges || loading}
-              style={{ padding: '0.6rem 1.1rem', gap: '0.5rem' }}
-            >
-              <Save size={16} />
-              {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => handleSave(true)}
-              disabled={saving || loading}
-              style={{ padding: '0.6rem 1.3rem', gap: '0.5rem' }}
-              title="Save changes and immediately run an integrity check to verify detection and see diffs"
-            >
-              <Zap size={16} />
-              {saving ? 'Saving…' : 'Save & Check Now ⚡'}
-            </button>
+            {!readOnly && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => handleSave(false)}
+                  disabled={saving || !hasChanges || loading}
+                  style={{ padding: '0.6rem 1.1rem', gap: '0.5rem' }}
+                >
+                  <Save size={16} />
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => handleSave(true)}
+                  disabled={saving || loading}
+                  style={{ padding: '0.6rem 1.3rem', gap: '0.5rem' }}
+                  title="Save changes and immediately run an integrity check to verify detection and see diffs"
+                >
+                  <Zap size={16} />
+                  {saving ? 'Saving…' : 'Save & Check Now ⚡'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
