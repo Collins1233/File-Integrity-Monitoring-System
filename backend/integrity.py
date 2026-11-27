@@ -101,10 +101,14 @@ def _compare_monitor(monitor, generate_report=True):
         if file_path not in current_files:
             deleted_files.append(file_path)
             file_metadata[file_path] = _build_file_metadata(old_files[file_path])
+            file_metadata[file_path]["old_hash"] = old_files[file_path].get("hash")
+            file_metadata[file_path]["new_hash"] = None
         elif old_files[file_path]["hash"] != current_files[file_path]["hash"]:
             modified_files.append(file_path)
             old_info = old_files[file_path]
             file_metadata[file_path] = _build_file_metadata(old_info)
+            file_metadata[file_path]["old_hash"] = old_info.get("hash")
+            file_metadata[file_path]["new_hash"] = current_files[file_path].get("hash")
 
             if old_info.get("is_text_file") and old_info.get("content_snapshot") and not old_info.get("hash_only"):
                 old_lines = old_info.get("content_snapshot", [])
@@ -127,6 +131,14 @@ def _compare_monitor(monitor, generate_report=True):
     for file_path in current_files:
         if file_path not in old_files:
             new_files.append(file_path)
+            file_metadata[file_path] = {
+                "can_restore": False,
+                "file_type": current_files[file_path].get("file_type", "Unknown"),
+                "extension": current_files[file_path].get("extension", ""),
+                "has_backup": False,
+                "old_hash": None,
+                "new_hash": current_files[file_path].get("hash"),
+            }
 
     if monitor_type == "files":
         new_files = []

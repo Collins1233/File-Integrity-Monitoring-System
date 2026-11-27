@@ -41,6 +41,7 @@ from baseline_store import (
     set_active_monitor,
     remove_monitor,
     accept_monitor_changes,
+    accept_file_changes,
     restore_file,
     count_unique_monitored_files,
     legacy_load_baseline as load_baseline,
@@ -121,6 +122,12 @@ class SimulateScenarioRequest(BaseModel):
 
 class AcceptBaselineRequest(BaseModel):
     monitor_id: Optional[str] = None
+    path: Optional[str] = None  # when set, only this one file is marked safe
+
+class FlagFileRequest(BaseModel):
+    path: str
+    note: Optional[str] = None
+    change: Optional[str] = None  # modified | deleted | added
 
 class TokenRequest(BaseModel):
     api_key: Optional[str] = None
@@ -321,12 +328,59 @@ def api_remove_monitor(monitor_id: str):
     return {"success": True, **_status_payload()}
 
 
+def _drop_path_from_last_result(path: str) -> None:
+    """Remove a file from the latest scan result and pending alerts (after restore / mark-as-safe)."""
+    target = os.path.normcase(os.path.normpath(path))
+
+    def same(p: str) -> bool:
+        return os.path.normcase(os.path.normpath(p)) == target
+
+    last = monitor_service.last_result
+    if isinstance(last, dict):
+        for key in ("modified_files", "deleted_files", "new_files"):
+            last[key] = [p for p in (last.get(key) or []) if not same(p)]
+        last["text_differences"] = {k: v for k, v in (last.get("text_differences") or {}).items() if not same(k)}
+        last["file_metadata"] = {k: v for k, v in (last.get("file_metadata") or {}).items() if not same(k)}
+        last["modified_count"] = len(last.get("modified_files") or [])
+        last["deleted_count"] = len(last.get("deleted_files") or [])
+        last["new_count"] = len(last.get("new_files") or [])
+        monitor_service.last_result = last
+
+    remaining_alerts = []
+    for alert in monitor_service.get_alerts():
+        affected = alert.get("affected_files") or []
+        still_affected = [item for item in affected if not same(item.get("path") or "")]
+        if still_affected:
+            remaining_alerts.append({**alert, "affected_files": still_affected})
+    monitor_service._pending_alerts = remaining_alerts
+
+
 @app.post("/api/baseline/accept", dependencies=[Depends(require_analyst)])
 def api_accept_baseline(request: AcceptBaselineRequest):
+    # One file only: "Mark as Safe (Update Baseline)" from the File Changes page.
+    if request.path:
+        result = accept_file_changes(request.path, request.monitor_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("message", "Could not update baseline."))
+        _drop_path_from_last_result(request.path)
+        save_log(f"[MARKED SAFE] {request.path} (baseline updated for this file)")
+        return {**result, "last_result": monitor_service.last_result}
+
     result = accept_monitor_changes(request.monitor_id)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "Could not update baseline."))
+    save_log(f"[BASELINE RESET] {result.get('folder_path')} ({result.get('file_count')} files re-saved)")
     return result
+
+
+@app.post("/api/files/flag", dependencies=[Depends(require_analyst)])
+def api_flag_file(request: FlagFileRequest):
+    """Record that a reviewer flagged a changed file as a problem (shows up in the audit trail)."""
+    note = (request.note or "").strip().replace("\n", " ")[:300]
+    change = (request.change or "change").lower()
+    suffix = f" - {note}" if note else ""
+    save_log(f"[FLAGGED ISSUE] {request.path} ({change}){suffix}")
+    return {"success": True, "path": request.path, "flagged_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
 @app.post("/api/files/restore", dependencies=[Depends(require_analyst)])
@@ -337,37 +391,7 @@ def api_restore_file(request: RestoreFileRequest):
 
     restored = result.get("restored_path") or request.path
     # Drop this file from the latest check result / alerts so undo is not treated as a new change.
-    last = monitor_service.last_result
-    if isinstance(last, dict):
-        for key in ("modified_files", "deleted_files", "new_files"):
-            paths = last.get(key) or []
-            last[key] = [p for p in paths if p != restored and os.path.normcase(os.path.normpath(p)) != os.path.normcase(os.path.normpath(restored))]
-        diffs = last.get("text_differences") or {}
-        diffs.pop(restored, None)
-        for key in list(diffs.keys()):
-            if os.path.normcase(os.path.normpath(key)) == os.path.normcase(os.path.normpath(restored)):
-                diffs.pop(key, None)
-        meta = last.get("file_metadata") or {}
-        meta.pop(restored, None)
-        last["text_differences"] = diffs
-        last["file_metadata"] = meta
-        last["modified_count"] = len(last.get("modified_files") or [])
-        last["deleted_count"] = len(last.get("deleted_files") or [])
-        last["new_count"] = len(last.get("new_files") or [])
-        monitor_service.last_result = last
-
-    remaining_alerts = []
-    for alert in monitor_service.get_alerts():
-        affected = alert.get("affected_files") or []
-        still_affected = [
-            item for item in affected
-            if item.get("path") != restored
-            and os.path.normcase(os.path.normpath(item.get("path") or "")) != os.path.normcase(os.path.normpath(restored))
-        ]
-        if still_affected:
-            alert = {**alert, "affected_files": still_affected}
-            remaining_alerts.append(alert)
-    monitor_service._pending_alerts = remaining_alerts
+    _drop_path_from_last_result(restored)
 
     save_log(f"[RESTORED] {restored} (baseline refreshed, not treated as a new change)")
     return {**result, "last_result": monitor_service.last_result}

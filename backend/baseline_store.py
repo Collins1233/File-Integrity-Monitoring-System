@@ -410,6 +410,75 @@ def accept_monitor_changes(monitor_id: str | None = None) -> dict:
     }
 
 
+def _same_path(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def _find_monitor_for_path(file_path: str, monitor_id: str | None = None) -> dict | None:
+    """Locate the monitor that owns a file (already in its baseline, or inside its folder)."""
+    monitors = get_monitors()
+    candidates = [m for m in monitors if m["id"] == monitor_id] if monitor_id else []
+    candidates += [m for m in monitors if m not in candidates]
+    for monitor in candidates:
+        if any(_same_path(key, file_path) for key in monitor.get("files", {})):
+            return monitor
+    for monitor in candidates:
+        if monitor.get("monitor_type", "folder") == "folder":
+            folder = normalize_folder_path(monitor["folder_path"])
+            try:
+                if os.path.commonpath([os.path.abspath(folder), os.path.abspath(file_path)]) == os.path.abspath(folder):
+                    return monitor
+            except ValueError:
+                continue
+    return None
+
+
+def accept_file_changes(file_path: str, monitor_id: str | None = None) -> dict:
+    """Mark ONE file as safe: refresh (or add/remove) just its baseline entry."""
+    monitor = _find_monitor_for_path(file_path, monitor_id)
+    if not monitor:
+        return {"success": False, "message": "That file is not part of any monitored folder."}
+
+    existing_key = next((key for key in monitor["files"] if _same_path(key, file_path)), None)
+    key = existing_key or file_path
+
+    if not os.path.isfile(file_path):
+        # File was deleted: accepting means "stop expecting it".
+        if existing_key is None:
+            return {"success": False, "message": "File not found on disk or in the baseline."}
+        monitor["files"].pop(existing_key, None)
+        if monitor.get("monitor_type") == "files":
+            monitor["watch_paths"] = [p for p in (monitor.get("watch_paths") or []) if not _same_path(p, file_path)]
+        action = "removed"
+    else:
+        scanned = scan_files_with_options([file_path])
+        refreshed = scanned.get(file_path) or next(iter(scanned.values()), None)
+        if not refreshed:
+            return {"success": False, "message": "Could not read the file to update its baseline."}
+        folder_path = monitor["folder_path"]
+        if monitor.get("monitor_type") == "files":
+            _backup_supported_files({key: refreshed}, folder_path, monitor_id=monitor["id"], monitor_type="files")
+        else:
+            _backup_supported_files({key: refreshed}, normalize_folder_path(folder_path), monitor_type="folder")
+        monitor["files"][key] = refreshed
+        action = "updated" if existing_key else "added"
+
+    store = load_store()
+    for index, item in enumerate(store["monitors"]):
+        if item["id"] == monitor["id"]:
+            store["monitors"][index] = monitor
+            break
+    _save_store(store)
+
+    return {
+        "success": True,
+        "monitor_id": monitor["id"],
+        "path": key,
+        "action": action,
+        "file_count": len(monitor["files"]),
+    }
+
+
 def restore_file(file_path: str, monitor_id: str | None = None) -> dict:
     monitor = get_monitor(monitor_id)
     if not monitor:

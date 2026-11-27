@@ -1,52 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  Shield, 
-  Folder, 
-  FileText, 
-  RefreshCw, 
-  Activity, 
-  AlertTriangle, 
-  FilePlus, 
-  FileMinus, 
-  Clock, 
-  ChevronRight,
-  Download,
-  Terminal,
-  Settings,
-  HardDrive,
-  Bell,
-  BellOff,
-  Radio,
-  Files,
-  Zap,
-  Trash2,
-  RotateCcw,
-  Eye,
-  HelpCircle,
-  FileStack,
-  Plus,
-  Laptop,
-  Upload
-} from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 
-import FileChangeViewer from './FileChangeViewer';
 import BootSequence, { shouldShowBoot } from './BootSequence';
-import FileDocumentPreview from './FileDocumentPreview';
-import ToastNotification from './ToastNotification';
-import MonitoredFilesPanel from './MonitoredFilesPanel';
 import VersionGate from './VersionGate';
 import OnboardingWizard from './OnboardingWizard';
 import SettingsPanel from './SettingsPanel';
-import HelpTour from './HelpTour';
-import AppHeader from './AppHeader';
 import ConfirmDialog from './ConfirmDialog';
 import DirectoryBrowserModal from './DirectoryBrowserModal';
-import FileEditorModal from './FileEditorModal';
-import AttackSimulatorToolbar from './AttackSimulatorToolbar';
-import {
-  formatAlertTitle,
-  getAffectedFiles,
-} from './alertUtils';
+import ToastNotification from './ToastNotification';
+import { formatAlertTitle, getAffectedFiles } from './alertUtils';
 
 import {
   API_BASE,
@@ -59,7 +21,19 @@ import {
   setStoredApiKey,
 } from './api';
 
-const APP_ICON = `${window.location.origin}/fim-logo.png`;
+import TopBar from './fims/TopBar';
+import DashboardPage from './fims/DashboardPage';
+import FoldersPage from './fims/FoldersPage';
+import ChangesPage from './fims/ChangesPage';
+import AuditPage from './fims/AuditPage';
+import FileEditor from './fims/FileEditor';
+import HelpDialog from './fims/HelpDialog';
+import FlagDialog from './fims/FlagDialog';
+import TestingSandbox from './fims/TestingSandbox';
+import { buildChangeList, buildStatusLookup } from './fims/changes';
+
+const APP_ICON = `${typeof window !== 'undefined' ? window.location.origin : ''}/fim-logo.png`;
+const DEV_SESSION_KEY = 'fim_dev_session';
 
 function sanitizeFolderPath(rawPath) {
   return rawPath
@@ -76,10 +50,8 @@ const FOLDER_PATH_PLACEHOLDER = IS_WINDOWS
   : 'Or paste a path, e.g. /full/path/to/folder';
 
 const FOLDER_HELP_TEXT = IS_WINDOWS
-  ? 'Use Add Folder to browse in File Explorer, or Add Files to pick specific files. You can also paste a full path below if the picker does not open.'
-  : 'Use Add Folder / Add Files to browse, or paste a folder path below.';
-
-const DEV_SESSION_KEY = 'fim_dev_session';
+  ? 'Use Choose Folder to browse in File Explorer, or Choose Files to pick specific files. You can also paste a full path below.'
+  : 'Use Choose Folder / Choose Files to browse, or paste a folder path below.';
 
 function formatApiError(detail, fallback = 'Request failed') {
   if (typeof detail === 'string') return detail;
@@ -89,57 +61,26 @@ function formatApiError(detail, fallback = 'Request failed') {
   return fallback;
 }
 
-const PAGE_LABELS = {
-  dashboard: 'Overview',
-  files: 'Monitored Files',
-  logs: 'System Logs',
-  reports: 'Reports Archive',
-  settings: 'Settings',
-  help: 'Guided Tour',
-};
-
-const HEADER_META = {
-  dashboard: {
-    title: 'Overview',
-    subtitle: 'Monitor folders and files, run checks, and review changes.',
-  },
-  files: {
-    title: 'Monitored Files',
-    subtitle: 'Search, preview, and restore files from your baselines.',
-  },
-  logs: {
-    title: 'System Logs',
-    subtitle: 'Audit trail of scans, alerts, and system events.',
-  },
-  reports: {
-    title: 'Reports Archive',
-    subtitle: 'Preview and download integrity PDF reports.',
-  },
-  settings: {
-    title: 'Settings',
-    subtitle: 'Adjust monitoring schedule, exclusions, and retention.',
-  },
-  help: {
-    title: 'Guided Tour',
-    subtitle: 'Walk through every part of the dashboard step by step.',
-  },
-};
-
-function App() {
+export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [status, setStatus] = useState({
     has_baseline: false,
     folder_path: '',
     created_at: '',
-    file_count: 0
+    file_count: 0,
   });
-  
+
   const [folderPathInput, setFolderPathInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [folderLoading, setFolderLoading] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [restoringPath, setRestoringPath] = useState(null);
-  const [logs, setLogs] = useState([]);
+  const [busyPath, setBusyPath] = useState(null);
+  const [selectedChangePath, setSelectedChangePath] = useState(null);
+  const [flaggedPaths, setFlaggedPaths] = useState(() => new Set());
+  const [flagTarget, setFlagTarget] = useState(null);
+  const [flagBusy, setFlagBusy] = useState(false);
+
   const [reports, setReports] = useState([]);
   const [systemLogs, setSystemLogs] = useState([]);
   const [monitoring, setMonitoring] = useState({
@@ -163,29 +104,18 @@ function App() {
   const [showBoot, setShowBoot] = useState(() => shouldShowBoot());
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('fim_onboarding_done'));
   const [previewReport, setPreviewReport] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+
   const [notificationPermission, setNotificationPermission] = useState(
     () => (typeof Notification !== 'undefined' ? Notification.permission : 'default')
   );
+
   const seenAlertIds = useRef(new Set());
-  const devSessionRef = useRef(sessionStorage.getItem(DEV_SESSION_KEY) || '');
+  const devSessionRef = useRef(typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(DEV_SESSION_KEY) || '' : '');
   const healthFailures = useRef(0);
   const folderPickerRef = useRef(null);
   const filesPickerRef = useRef(null);
-
-  const handleRoleChange = (newRole) => {
-    setStoredRole(newRole);
-    setCurrentRole(newRole);
-    if (newRole === 'viewer') {
-      setStoredApiKey('fim_viewer_demo');
-    } else if (newRole === 'analyst') {
-      setStoredApiKey('fim_analyst_demo');
-    } else if (newRole === 'auditor') {
-      setStoredApiKey('fim_auditor_demo');
-    } else {
-      setStoredApiKey('');
-    }
-    window.location.reload();
-  };
   const busyRef = useRef(false);
   const confirmResolver = useRef(null);
   const [confirmState, setConfirmState] = useState(null);
@@ -193,6 +123,24 @@ function App() {
   const [browserModalMode, setBrowserModalMode] = useState('folder');
   const [editorModalOpen, setEditorModalOpen] = useState(false);
   const [editorFilePath, setEditorFilePath] = useState(null);
+
+  const canAct = currentRole !== 'viewer';
+  const isAdmin = currentRole === 'admin';
+
+  // Flat changes list & lookup for fast status badge rendering
+  const changes = useMemo(() => buildChangeList(checkResult), [checkResult]);
+  const statusLookup = useMemo(() => buildStatusLookup(changes), [changes]);
+
+  // Keep selected change valid
+  useEffect(() => {
+    if (changes.length > 0) {
+      if (!selectedChangePath || !changes.some((c) => c.path === selectedChangePath)) {
+        setSelectedChangePath(changes[0].path);
+      }
+    } else {
+      setSelectedChangePath(null);
+    }
+  }, [changes, selectedChangePath]);
 
   const requestConfirm = useCallback((options) => new Promise((resolve) => {
     confirmResolver.current = resolve;
@@ -223,23 +171,24 @@ function App() {
   }, [monitoring.is_checking, scanProgress.active, loading]);
 
   const addConsoleLog = useCallback((message, type = 'info') => {
+    // Also prepend to systemLogs if appropriate
     const timestamp = new Date().toLocaleTimeString();
-    setLogs(prev => [...prev, { timestamp, message, type }]);
+    setSystemLogs((prev) => [{ timestamp, message, type }, ...prev]);
   }, []);
 
   const addToast = useCallback((alert) => {
-    setToasts(prev => {
-      if (prev.some(t => t.id === alert.id)) return prev;
+    setToasts((prev) => {
+      if (prev.some((t) => t.id === alert.id)) return prev;
       return [...prev, alert];
     });
 
-    if ('Notification' in window && Notification.permission === 'granted') {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       const affected = getAffectedFiles(alert);
       const fileLine = affected.length
         ? affected.map((file) => file.name).join(', ')
         : 'Unknown file';
 
-      new Notification('FIM Dashboard', {
+      new Notification('FIMS Alert', {
         body: `${formatAlertTitle(alert)}\n${fileLine}`,
         icon: APP_ICON,
         badge: APP_ICON,
@@ -249,7 +198,7 @@ function App() {
   }, []);
 
   const dismissToast = async (alertId) => {
-    setToasts(prev => prev.filter(t => t.id !== alertId));
+    setToasts((prev) => prev.filter((t) => t.id !== alertId));
     try {
       await apiFetch(`${API_BASE}/api/monitoring/alerts/acknowledge`, {
         method: 'POST',
@@ -261,74 +210,8 @@ function App() {
     }
   };
 
-  const fetchMonitoring = useCallback(async () => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/monitoring/status`);
-      if (!res.ok) throw new Error('offline');
-      markServerOnline();
-      const data = await res.json();
-      setMonitoring(data);
-
-      if (data.last_result?.success) {
-        setCheckResult(data.last_result);
-      } else {
-        setCheckResult(null);
-      }
-
-      const alertsRes = await apiFetch(`${API_BASE}/api/monitoring/alerts`);
-      const alertsData = await alertsRes.json();
-      const alerts = alertsData.alerts || [];
-
-      for (const alert of alerts) {
-        if (!seenAlertIds.current.has(alert.id)) {
-          seenAlertIds.current.add(alert.id);
-          addToast(alert);
-          const affectedNames = getAffectedFiles(alert).map((file) => file.name).join(', ');
-          addConsoleLog(
-            `Auto check alert: ${formatAlertTitle(alert)} (${affectedNames || 'no file names'})`,
-            'danger'
-          );
-        }
-      }
-    } catch (err) {
-      markServerFailure();
-      console.error('Error fetching monitoring status:', err);
-    }
-  }, [addToast, addConsoleLog, markServerOnline, markServerFailure]);
-
-  const handleToggleMonitoring = async () => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/monitoring/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !monitoring.enabled }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        addConsoleLog(`Access Denied: ${data.detail || 'Insufficient permissions.'}`, 'danger');
-        return;
-      }
-      setMonitoring(data);
-      addConsoleLog(
-        data.enabled ? 'Background monitoring enabled (every 20 min).' : 'Background monitoring paused.',
-        data.enabled ? 'success' : 'warning'
-      );
-    } catch (err) {
-      addConsoleLog(`Failed to toggle monitoring: ${err.message}`, 'danger');
-    }
-  };
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) return;
-    const result = await Notification.requestPermission();
-    setNotificationPermission(result);
-    if (result === 'granted') {
-      addConsoleLog('Browser notifications enabled.', 'success');
-    }
-  };
-
   const dismissAllToasts = async () => {
-    const ids = toasts.map((toast) => toast.id);
+    const ids = toasts.map((t) => t.id);
     setToasts([]);
     if (ids.length) {
       try {
@@ -343,7 +226,28 @@ function App() {
     }
   };
 
-  // Fetch status, reports, and logs
+  const requestNotificationPermission = async () => {
+    if (typeof Notification === 'undefined') return;
+    const result = await Notification.requestPermission();
+    setNotificationPermission(result);
+  };
+
+  const handleRoleChange = (newRole) => {
+    setStoredRole(newRole);
+    setCurrentRole(newRole);
+    if (newRole === 'viewer') {
+      setStoredApiKey('fim_viewer_demo');
+    } else if (newRole === 'analyst') {
+      setStoredApiKey('fim_analyst_demo');
+    } else if (newRole === 'auditor') {
+      setStoredApiKey('fim_auditor_demo');
+    } else {
+      setStoredApiKey('');
+    }
+    window.location.reload();
+  };
+
+  // Fetch functions
   const fetchStatus = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/status`);
@@ -354,11 +258,6 @@ function App() {
       const devSession = data.dev_session || '';
       if (devSession && devSessionRef.current && devSessionRef.current !== devSession) {
         setCheckResult(null);
-        setLogs([{
-          timestamp: new Date().toLocaleTimeString(),
-          message: 'New dev session. Dashboard reset.',
-          type: 'info',
-        }]);
         setToasts([]);
         setMonitoredFiles([]);
         setPreviewReport(null);
@@ -383,9 +282,9 @@ function App() {
     try {
       const res = await apiFetch(`${API_BASE}/api/reports`);
       const data = await res.json();
-      setReports(data);
+      setReports(data || []);
     } catch (err) {
-      console.error("Error fetching reports:", err);
+      console.error('Error fetching reports:', err);
     }
   };
 
@@ -395,7 +294,7 @@ function App() {
       const data = await res.json();
       setSystemLogs(data.logs || []);
     } catch (err) {
-      console.error("Error fetching logs:", err);
+      console.error('Error fetching logs:', err);
     }
   };
 
@@ -413,6 +312,34 @@ function App() {
     }
   };
 
+  const fetchMonitoring = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/monitoring/status`);
+      if (!res.ok) throw new Error('offline');
+      markServerOnline();
+      const data = await res.json();
+      setMonitoring(data);
+
+      if (data.last_result?.success) {
+        setCheckResult(data.last_result);
+      }
+
+      const alertsRes = await apiFetch(`${API_BASE}/api/monitoring/alerts`);
+      const alertsData = await alertsRes.json();
+      const alerts = alertsData.alerts || [];
+
+      for (const alert of alerts) {
+        if (!seenAlertIds.current.has(alert.id)) {
+          seenAlertIds.current.add(alert.id);
+          addToast(alert);
+        }
+      }
+    } catch (err) {
+      markServerFailure();
+      console.error('Error fetching monitoring status:', err);
+    }
+  }, [addToast, markServerOnline, markServerFailure]);
+
   const fetchScanProgress = async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/scan/progress`);
@@ -421,54 +348,9 @@ function App() {
         setScanProgress(await res.json());
       }
     } catch {
-      // ignore transient progress poll errors during scans
+      // ignore transient poll errors
     }
   };
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-    localStorage.setItem('fim_dark_mode', darkMode ? 'true' : 'false');
-  }, [darkMode]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function boot() {
-      await resolveApiBase();
-      if (cancelled) return;
-      await fetchStatus();
-      if (cancelled) return;
-      fetchReports();
-      fetchLogs();
-      fetchMonitoring();
-      fetchMonitoredFiles();
-      requestNotificationPermission();
-    }
-
-    boot();
-
-    const monitoringInterval = setInterval(fetchMonitoring, 2500);
-    const healthInterval = setInterval(async () => {
-      if (cancelled) return;
-      await resolveApiBase();
-      fetchStatus();
-    }, 10000);
-    const progressInterval = setInterval(fetchScanProgress, 1500);
-    return () => {
-      cancelled = true;
-      clearInterval(monitoringInterval);
-      clearInterval(healthInterval);
-      clearInterval(progressInterval);
-    };
-  }, [fetchMonitoring, fetchStatus]);
-
-  useEffect(() => {
-    if (activeTab === 'files' && status.has_baseline) fetchMonitoredFiles(activeMonitorId);
-  }, [activeTab, status.has_baseline, activeMonitorId]);
-
-  useEffect(() => {
-    if (activeTab === 'logs') fetchLogs();
-  }, [activeTab]);
 
   const refreshMonitorState = async (monitorId) => {
     try {
@@ -487,94 +369,271 @@ function App() {
     }
   };
 
+  // Initial boot
+  useEffect(() => {
+    let cancelled = false;
+    async function boot() {
+      await resolveApiBase();
+      if (cancelled) return;
+      await fetchStatus();
+      if (cancelled) return;
+      fetchReports();
+      fetchLogs();
+      fetchMonitoring();
+      fetchMonitoredFiles();
+    }
+    boot();
+
+    const monitoringInterval = setInterval(fetchMonitoring, 2500);
+    const healthInterval = setInterval(async () => {
+      if (cancelled) return;
+      await resolveApiBase();
+      fetchStatus();
+    }, 10000);
+    const progressInterval = setInterval(fetchScanProgress, 1500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(monitoringInterval);
+      clearInterval(healthInterval);
+      clearInterval(progressInterval);
+    };
+  }, [fetchMonitoring, fetchStatus]);
+
   // Actions
+  const handleCheckNow = async () => {
+    setLoading(true);
+    addConsoleLog('Running integrity scan…', 'info');
+    try {
+      const res = await apiFetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCheckResult(data);
+        const total = (data.modified_files || []).length + (data.deleted_files || []).length + (data.new_files || []).length;
+        if (total === 0) {
+          addConsoleLog('Scan complete: all files match the baseline.', 'success');
+        } else {
+          addConsoleLog(`Scan complete: ${total} change${total === 1 ? '' : 's'} detected.`, 'warning');
+        }
+        fetchReports();
+        fetchLogs();
+        fetchMonitoring();
+      } else {
+        if (data.tamper_detected) {
+          setCheckResult(data);
+          addConsoleLog(`Baseline tampering detected! ${data.message}`, 'danger');
+        } else {
+          addConsoleLog(`Scan failed: ${data.detail || data.message || 'Unknown error'}`, 'danger');
+        }
+      }
+    } catch (err) {
+      addConsoleLog(`Error running scan: ${err.message}`, 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleMonitoring = async () => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/monitoring/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !monitoring.enabled }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addConsoleLog(`Access denied: ${data.detail || 'Insufficient permissions.'}`, 'danger');
+        return;
+      }
+      setMonitoring(data);
+      addConsoleLog(
+        data.enabled ? 'Background monitoring enabled.' : 'Background monitoring paused.',
+        data.enabled ? 'success' : 'warning'
+      );
+    } catch (err) {
+      addConsoleLog(`Failed to toggle monitoring: ${err.message}`, 'danger');
+    }
+  };
+
+  // Mark single file as safe (update baseline for this file only)
+  const handleMarkFileSafe = async (change) => {
+    const confirmed = await requestConfirm({
+      title: 'Mark this change as safe?',
+      message: `Accept the new version of "${change.name}" into the baseline? Future scans will compare against this snapshot.`,
+      confirmLabel: 'Mark as Safe (Update Baseline)',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
+    setBusyPath(change.path);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/baseline/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: change.path,
+          monitor_id: activeMonitorId,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addConsoleLog(`Marked safe & updated baseline for ${change.name}`, 'success');
+        addToast({
+          id: Date.now(),
+          type: 'success',
+          title: 'Baseline Updated',
+          message: `${change.name} is now marked safe in the baseline.`,
+        });
+        if (data.last_result) {
+          setCheckResult(data.last_result);
+        } else if (checkResult) {
+          const same = (p) => String(p).toLowerCase() === String(change.path).toLowerCase();
+          setCheckResult({
+            ...checkResult,
+            modified_files: (checkResult.modified_files || []).filter((p) => !same(p)),
+            deleted_files: (checkResult.deleted_files || []).filter((p) => !same(p)),
+            new_files: (checkResult.new_files || []).filter((p) => !same(p)),
+            text_differences: Object.fromEntries(
+              Object.entries(checkResult.text_differences || {}).filter(([p]) => !same(p))
+            ),
+            file_metadata: Object.fromEntries(
+              Object.entries(checkResult.file_metadata || {}).filter(([p]) => !same(p))
+            ),
+          });
+        }
+        fetchStatus();
+        fetchMonitoredFiles();
+        fetchLogs();
+      } else {
+        addConsoleLog(`Could not mark safe: ${data.detail || 'Request failed'}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error updating baseline: ${err.message}`, 'danger');
+    } finally {
+      setBusyPath(null);
+    }
+  };
+
+  // Mark all changed files as safe (full baseline reset)
+  const handleAcceptBaseline = async () => {
+    const confirmed = await requestConfirm({
+      title: 'Accept new baseline?',
+      message: 'Accept all current files as the new baseline? Future scans will compare against this snapshot.',
+      confirmLabel: 'Accept new baseline',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/baseline/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ monitor_id: activeMonitorId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addConsoleLog(`Baseline updated: ${data.file_count} files snapshotted.`, 'success');
+        setCheckResult(null);
+        fetchStatus();
+        fetchMonitoredFiles();
+        fetchLogs();
+      } else {
+        addConsoleLog(`Could not update baseline: ${data.detail}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Error updating baseline: ${err.message}`, 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Flag issue
+  const handleFlagFile = async (note) => {
+    if (!flagTarget) return;
+    setFlagBusy(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/files/flag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: flagTarget.path,
+          note: note || '',
+          status: flagTarget.status,
+        }),
+      });
+      if (res.ok) {
+        setFlaggedPaths((prev) => new Set([...prev, flagTarget.path]));
+        addConsoleLog(`Flagged issue for ${flagTarget.name}: ${note || 'Recorded in audit log'}`, 'warning');
+        addToast({
+          id: Date.now(),
+          type: 'warning',
+          title: 'Issue Flagged',
+          message: `${flagTarget.name} has been recorded in the audit log for review.`,
+        });
+        fetchLogs();
+      }
+    } catch (err) {
+      addConsoleLog(`Error flagging file: ${err.message}`, 'danger');
+    } finally {
+      setFlagBusy(false);
+      setFlagTarget(null);
+    }
+  };
+
+  // Restore file
+  const handleRestoreFile = async (path) => {
+    const confirmed = await requestConfirm({
+      title: 'Restore original file?',
+      message: 'This will undo the changes and replace the current file with the baseline backup.',
+      detail: path,
+      confirmLabel: 'Restore original',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
+    setRestoringPath(path);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/files/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, monitor_id: activeMonitorId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addConsoleLog(`Restored file from backup: ${path}`, 'success');
+        fetchMonitoredFiles();
+        if (data.last_result) {
+          setCheckResult(data.last_result);
+        } else if (checkResult) {
+          const same = (p) => String(p).toLowerCase() === String(path).toLowerCase();
+          setCheckResult({
+            ...checkResult,
+            modified_files: (checkResult.modified_files || []).filter((p) => !same(p)),
+            deleted_files: (checkResult.deleted_files || []).filter((p) => !same(p)),
+            new_files: (checkResult.new_files || []).filter((p) => !same(p)),
+          });
+        }
+        fetchMonitoring();
+      } else {
+        addConsoleLog(`Restore failed: ${data.detail}`, 'danger');
+      }
+    } catch (err) {
+      addConsoleLog(`Restore error: ${err.message}`, 'danger');
+    } finally {
+      setRestoringPath(null);
+    }
+  };
+
+  // Adding folders & files
   const handleSelectFolder = () => {
-    handleDeviceFolderPick();
+    folderPickerRef.current?.click();
   };
 
   const handleSelectFiles = () => {
-    handleDeviceFilesPick();
+    filesPickerRef.current?.click();
   };
 
   const handleOpenServerBrowser = (mode = 'folder') => {
     setBrowserModalMode(mode);
     setBrowserModalOpen(true);
-  };
-
-  const handleFolderBrowserSelect = async (folderPath) => {
-    if (!folderPath) return;
-    setFolderLoading(true);
-    try {
-      addConsoleLog(`Adding folder monitor: ${folderPath}…`, 'info');
-      const res = await apiFetch(`${API_BASE}/api/monitors/folder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder_path: folderPath }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const action = data.is_new_monitor ? 'added' : 'already monitored (baseline refreshed)';
-        addConsoleLog(`Folder ${action}: ${data.folder_path}`, data.is_new_monitor ? 'success' : 'warning');
-        addConsoleLog(
-          `${data.file_count} files in baseline. ${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total.`,
-          'success'
-        );
-        setFolderPathInput(data.folder_path);
-        await refreshMonitorState(data.monitor_id);
-        fetchLogs();
-        fetchMonitoring();
-      } else {
-        const msg = formatApiError(data.detail, 'Invalid or missing folder path');
-        addConsoleLog(`Could not add folder: ${msg}`, 'danger');
-      }
-    } catch (err) {
-      addConsoleLog(
-        isNetworkError(err) ? API_CONNECTION_HELP : `Error adding folder: ${err.message}`,
-        'danger'
-      );
-    } finally {
-      setFolderLoading(false);
-    }
-  };
-
-  const handleFilesBrowserSelect = async (filePaths) => {
-    if (!filePaths || filePaths.length === 0) return;
-    setFolderLoading(true);
-    try {
-      addConsoleLog(`Adding ${filePaths.length} file(s) to monitor…`, 'info');
-      const res = await apiFetch(`${API_BASE}/api/monitors/files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_paths: filePaths }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const action = data.is_new_monitor === false ? 'updated' : 'added';
-        addConsoleLog(
-          `Files ${action}: ${data.file_count} file${data.file_count === 1 ? '' : 's'} in this selection`,
-          'success'
-        );
-        addConsoleLog(data.folder_path, 'info');
-        await refreshMonitorState(data.monitor_id);
-        fetchLogs();
-        fetchMonitoring();
-      } else {
-        const msg = formatApiError(data.detail, 'Failed to add files');
-        addConsoleLog(`Could not add files: ${msg}`, 'danger');
-      }
-    } catch (err) {
-      addConsoleLog(`Error adding files: ${err.message}`, 'danger');
-    } finally {
-      setFolderLoading(false);
-    }
-  };
-
-  const handleDeviceFolderPick = () => {
-    folderPickerRef.current?.click();
-  };
-
-  const handleDeviceFilesPick = () => {
-    filesPickerRef.current?.click();
   };
 
   const handleDeviceFolderSelected = async (e) => {
@@ -603,7 +662,6 @@ function App() {
       const data = await res.json();
       if (res.ok && data.success) {
         addConsoleLog(`Folder baseline established: ${data.folder_path}`, 'success');
-        addConsoleLog(`${data.file_count} file(s) hashed with SHA-256 and signed with HMAC-SHA256.`, 'success');
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
@@ -641,7 +699,6 @@ function App() {
       const data = await res.json();
       if (res.ok && data.success) {
         addConsoleLog(`Files baseline established: ${data.folder_path}`, 'success');
-        addConsoleLog(`${data.file_count} file(s) hashed with SHA-256 and signed with HMAC-SHA256.`, 'success');
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
@@ -657,71 +714,10 @@ function App() {
     }
   };
 
-  const handleSimulateTamper = async (path) => {
-    try {
-      const res = await apiFetch(`${API_BASE}/api/files/simulate-tamper`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const fname = path.split(/[\\/]/).pop();
-        addConsoleLog(`Injected test modification into ${fname}. Run 'Check Now' to inspect diff!`, 'warning');
-        addToast({
-          id: Date.now(),
-          type: 'warning',
-          title: 'Test Modification Injected',
-          message: `Modified ${fname} on disk. Click "Check Now" to review changes.`,
-        });
-      }
-    } catch (err) {
-      addConsoleLog(`Error modifying file: ${err.message}`, 'danger');
-    }
-  };
-
-  const handleOpenEditor = (filePath) => {
-    if (!filePath) {
-      if (monitoredFiles && monitoredFiles.length > 0) {
-        filePath = monitoredFiles[0].path;
-      } else {
-        addToast({
-          id: Date.now(),
-          type: 'warning',
-          title: 'No file selected',
-          message: 'Please select a file to edit or monitor a folder first.',
-        });
-        return;
-      }
-    }
-    setEditorFilePath(filePath);
-    setEditorModalOpen(true);
-  };
-
-  const handleEditorSaved = async (filePath, checkImmediately, message) => {
-    const fname = filePath.split(/[\\/]/).pop();
-    addConsoleLog(`[EDITOR] Saved changes to ${fname}`, 'warning');
-    addToast({
-      id: Date.now(),
-      type: 'success',
-      title: 'File Saved in Browser',
-      message: message || `Saved changes to ${fname}.`,
-    });
-    await fetchFiles(activeMonitorId);
-    if (checkImmediately) {
-      setTimeout(() => {
-        handleCheckNow();
-      }, 400);
-    }
-  };
-
-  const handleAddFolderPath = async (event) => {
-    event?.preventDefault?.();
+  const handleAddFolderPath = async (e) => {
+    e?.preventDefault?.();
     const path = sanitizeFolderPath(folderPathInput);
-    if (!path) {
-      addConsoleLog('Enter a folder path first.', 'warning');
-      return;
-    }
+    if (!path) return;
     setFolderLoading(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/monitors/folder`, {
@@ -731,25 +727,62 @@ function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        const action = data.is_new_monitor ? 'added' : 'already monitored (baseline refreshed)';
-        addConsoleLog(`Folder ${action}: ${data.folder_path}`, data.is_new_monitor ? 'success' : 'warning');
-        addConsoleLog(`${data.file_count} files in baseline. ${data.monitor_count} monitor${data.monitor_count === 1 ? '' : 's'} total.`, 'success');
+        addConsoleLog(`Folder monitored: ${data.folder_path}`, 'success');
         setFolderPathInput('');
         await refreshMonitorState(data.monitor_id);
         fetchLogs();
         fetchMonitoring();
       } else {
-        const msg = formatApiError(data.detail, 'Invalid or missing folder path');
-        addConsoleLog(`Could not add folder: ${msg}`, 'danger');
-        if (IS_WINDOWS && /not found/i.test(msg)) {
-          addConsoleLog('Windows tip: if the folder window did not open, paste the full path from File Explorer into the box and click Add folder.', 'info');
-        }
+        addConsoleLog(`Could not add folder: ${formatApiError(data.detail)}`, 'danger');
       }
     } catch (err) {
-      addConsoleLog(
-        isNetworkError(err) ? API_CONNECTION_HELP : `Error adding folder: ${err.message}`,
-        'danger'
-      );
+      addConsoleLog(`Error adding folder: ${err.message}`, 'danger');
+    } finally {
+      setFolderLoading(false);
+    }
+  };
+
+  const handleFolderBrowserSelect = async (folderPath) => {
+    if (!folderPath) return;
+    setFolderLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/monitors/folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addConsoleLog(`Folder preset monitored: ${data.folder_path}`, 'success');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      }
+    } catch (err) {
+      addConsoleLog(`Error adding preset folder: ${err.message}`, 'danger');
+    } finally {
+      setFolderLoading(false);
+    }
+  };
+
+  const handleFilesBrowserSelect = async (filePaths) => {
+    if (!filePaths || filePaths.length === 0) return;
+    setFolderLoading(true);
+    try {
+      const res = await apiFetch(`${API_BASE}/api/monitors/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_paths: filePaths }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addConsoleLog(`Added ${data.file_count} preset files to monitor.`, 'success');
+        await refreshMonitorState(data.monitor_id);
+        fetchLogs();
+        fetchMonitoring();
+      }
+    } catch (err) {
+      addConsoleLog(`Error adding preset files: ${err.message}`, 'danger');
     } finally {
       setFolderLoading(false);
     }
@@ -758,7 +791,7 @@ function App() {
   const handleRemoveMonitor = async (monitorId, label) => {
     const confirmed = await requestConfirm({
       title: 'Remove monitor?',
-      message: 'Stop monitoring and remove this target?',
+      message: 'Stop monitoring and remove this target from FIMS?',
       detail: label,
       confirmLabel: 'Remove',
       cancelLabel: 'Keep monitoring',
@@ -785,140 +818,57 @@ function App() {
           created_at: data.created_at || '',
         }));
         await fetchMonitoredFiles(data.active_monitor_id);
-      } else {
-        addConsoleLog(`Could not remove monitor: ${data.detail}`, 'danger');
       }
     } catch (err) {
       addConsoleLog(`Error removing monitor: ${err.message}`, 'danger');
     }
   };
 
-  const handleCheckNow = async () => {
-    setLoading(true);
-    addConsoleLog('Running immediate integrity check…', 'info');
-    try {
-      const res = await apiFetch(`${API_BASE}/api/monitoring/check-now`, { method: 'POST' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setCheckResult(data);
-        const totalChanges = data.modified_files.length + data.deleted_files.length + data.new_files.length;
-        if (totalChanges === 0) {
-          addConsoleLog('Check complete. All files match the baseline.', 'success');
-        } else {
-          addConsoleLog(`Check complete: ${data.modified_files.length} modified, ${data.deleted_files.length} deleted, ${data.new_files.length} new.`, 'danger');
-        }
-        fetchReports();
-        fetchLogs();
-        fetchMonitoring();
-      } else {
-        if (data.tamper_detected) {
-          setCheckResult(data);
-          addConsoleLog(`🚨 ${data.message}`, 'danger');
-        } else {
-          addConsoleLog(`Check failed: ${data.detail || data.message || 'Unknown error'}`, 'danger');
-        }
-      }
-    } catch (err) {
-      addConsoleLog(`Error running check: ${err.message}`, 'danger');
-    } finally {
-      setLoading(false);
+  // In-browser editor
+  const handleOpenEditor = (filePath) => {
+    if (!filePath) {
+      if (monitoredFiles.length > 0) filePath = monitoredFiles[0].path;
+      else return;
     }
+    setEditorFilePath(filePath);
+    setEditorModalOpen(true);
   };
 
-  const handleAcceptBaseline = async () => {
-    const confirmed = await requestConfirm({
-      title: 'Accept new baseline?',
-      message: 'Accept current files as the new baseline? Future checks will compare against this snapshot.',
-      confirmLabel: 'Accept baseline',
-      cancelLabel: 'Cancel',
+  const handleEditorSaved = async (filePath, checkImmediately, message) => {
+    const fname = filePath.split(/[\\/]/).pop();
+    addConsoleLog(`Saved changes to ${fname}`, 'warning');
+    addToast({
+      id: Date.now(),
+      type: 'success',
+      title: 'File Saved',
+      message: message || `Saved changes to ${fname}.`,
     });
-    if (!confirmed) return;
-    setLoading(true);
-    try {
-      const res = await apiFetch(`${API_BASE}/api/baseline/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ monitor_id: activeMonitorId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        addConsoleLog(`Baseline updated: ${data.file_count} files snapshotted.`, 'success');
-        setCheckResult(null);
-        fetchStatus();
-        fetchMonitoredFiles();
-        fetchLogs();
-      } else {
-        addConsoleLog(`Could not update baseline: ${data.detail}`, 'danger');
-      }
-    } catch (err) {
-      addConsoleLog(`Error updating baseline: ${err.message}`, 'danger');
-    } finally {
-      setLoading(false);
+    await fetchMonitoredFiles(activeMonitorId);
+    if (checkImmediately) {
+      setTimeout(handleCheckNow, 400);
     }
   };
 
-  const handleRestoreFile = async (path) => {
-    const confirmed = await requestConfirm({
-      title: 'Restore original file?',
-      message: 'This will undo the changes and replace the current file with the baseline backup.',
-      detail: path,
-      confirmLabel: 'Restore original',
-      cancelLabel: 'Cancel',
-    });
-    if (!confirmed) return;
-    setRestoringPath(path);
+  // Report downloads & deletions
+  const handleDownloadReport = async (filename) => {
     try {
-      const res = await apiFetch(`${API_BASE}/api/files/restore`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, monitor_id: activeMonitorId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        addConsoleLog(`Restored file from backup: ${path}`, 'success');
-        fetchMonitoredFiles();
-        // Prefer server last_result after restore (file removed from change lists).
-        // Do not auto re-check: that was treating the undo as a fresh change/new file.
-        if (data.last_result) {
-          setCheckResult(data.last_result);
-        } else if (checkResult) {
-          const samePath = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-          setCheckResult({
-            ...checkResult,
-            modified_files: (checkResult.modified_files || []).filter((p) => !samePath(p, path)),
-            deleted_files: (checkResult.deleted_files || []).filter((p) => !samePath(p, path)),
-            new_files: (checkResult.new_files || []).filter((p) => !samePath(p, path)),
-            text_differences: Object.fromEntries(
-              Object.entries(checkResult.text_differences || {}).filter(([p]) => !samePath(p, path))
-            ),
-            file_metadata: Object.fromEntries(
-              Object.entries(checkResult.file_metadata || {}).filter(([p]) => !samePath(p, path))
-            ),
-          });
-        }
-        fetchMonitoring();
-      } else {
-        addConsoleLog(`Restore failed: ${data.detail}`, 'danger');
+      const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`);
+      if (!res.ok) {
+        addConsoleLog(`Could not download report: ${res.statusText}`, 'danger');
+        return;
       }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      addConsoleLog(`Downloaded report: ${filename}`, 'success');
     } catch (err) {
-      addConsoleLog(`Restore error: ${err.message}`, 'danger');
-    } finally {
-      setRestoringPath(null);
-    }
-  };
-
-  const handleSelectMonitor = async (monitorId) => {
-    try {
-      await apiFetch(`${API_BASE}/api/monitors/active`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ monitor_id: monitorId }),
-      });
-      setActiveMonitorId(monitorId);
-      fetchStatus();
-      fetchMonitoredFiles(monitorId);
-    } catch (err) {
-      console.error(err);
+      addConsoleLog(`Download failed: ${err.message}`, 'danger');
     }
   };
 
@@ -931,7 +881,6 @@ function App() {
       variant: 'danger',
     });
     if (!confirmed) return;
-
     try {
       const res = await apiFetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
@@ -939,50 +888,18 @@ function App() {
       if (res.ok) {
         addConsoleLog(`Deleted report: ${filename}`, 'warning');
         fetchReports();
-      } else {
-        const data = await res.json();
-        addConsoleLog(`Could not delete report: ${data.detail || 'Unknown error'}`, 'danger');
       }
     } catch (err) {
       addConsoleLog(`Error deleting report: ${err.message}`, 'danger');
     }
   };
 
-  const handleDownloadReport = async (filename) => {
-    try {
-      addConsoleLog(`Preparing download: ${filename}`, 'info');
-      const res = await fetch(`${API_BASE}/api/reports/${encodeURIComponent(filename)}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        addConsoleLog(`Could not download report: ${data.detail || res.statusText}`, 'danger');
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      // Delay revoke so Chrome/Edge finish writing the file.
-      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-      addConsoleLog(`Downloaded report: ${filename}`, 'success');
-    } catch (err) {
-      addConsoleLog(`Download failed: ${err.message}. Try Preview, then save from the PDF viewer.`, 'danger');
-    }
-  };
-
-  const formatCheckTime = (value) => {
-    if (!value) return 'Not yet';
-    const date = new Date(value.replace(' ', 'T'));
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString();
-  };
+  const tamperDetected = Boolean(
+    status?.baseline_integrity?.tamper_detected || checkResult?.tamper_detected
+  );
 
   return (
-    <div className="app-shell">
+    <div className="fx-app">
       <BootSequence open={showBoot} onComplete={() => setShowBoot(false)} />
       <VersionGate />
       <OnboardingWizard
@@ -998,715 +915,241 @@ function App() {
         }}
       />
 
-      <AppHeader
-        pageTitle={HEADER_META[activeTab]?.title || 'Overview'}
-        currentRole={currentRole}
-        onSelectRole={handleRoleChange}
-        darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode((value) => !value)}
-        onStartTour={() => setActiveTab('help')}
+      <TopBar
+        tab={activeTab}
+        onTab={setActiveTab}
+        changeCount={changes.length}
         serverOnline={serverOnline}
         pendingAlertCount={toasts.length || monitoring.pending_alert_count}
         notificationPermission={notificationPermission}
         onEnableNotifications={requestNotificationPermission}
         onDismissAlerts={dismissAllToasts}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+        currentRole={currentRole}
+        onSelectRole={handleRoleChange}
       />
 
+      {/* Global Alerts / Banners */}
       {!serverOnline && (
-        <div className="server-offline-banner">
-          <strong>Monitoring server offline.</strong>{' '}
-          {API_CONNECTION_HELP}
-          {' '}Reconnecting…
+        <div className="fx-shell-alert fx-shell-alert--danger" role="alert">
+          <strong>Monitoring server offline.</strong> {API_CONNECTION_HELP} Reconnecting…
         </div>
       )}
 
-      {scanProgress.active && (
-        <div className="scan-progress-banner">
-          <div className="scan-progress-text">
-            {scanProgress.operation || 'Scanning'}: {scanProgress.percent}% ({scanProgress.current}/{scanProgress.total})
+      {tamperDetected && (
+        <div className="fx-shell-alert fx-shell-alert--critical" role="alert">
+          <AlertTriangle size={20} aria-hidden="true" />
+          <div>
+            <strong>CRITICAL SECURITY WARNING: Baseline Tampering Detected!</strong>
+            <p>
+              The cryptographic HMAC-SHA256 signature for <code>baseline.json</code> is invalid.
+              The baseline was altered outside of FIMS. Please re-verify or reset the baseline immediately.
+            </p>
           </div>
-          <div className="scan-progress-bar"><span style={{ width: `${scanProgress.percent}%` }} /></div>
-          {scanProgress.current_file && <div className="scan-progress-file">{scanProgress.current_file}</div>}
         </div>
       )}
 
-      <div className="toast-container">
-        {toasts.map(alert => (
+      {/* Toasts */}
+      <div className="toast-container" aria-live="polite">
+        {toasts.map((alert) => (
           <ToastNotification
             key={alert.id}
             alert={alert}
             appIcon={APP_ICON}
-            pageName={PAGE_LABELS[activeTab] || 'Overview'}
+            pageName="FIMS"
             onDismiss={dismissToast}
           />
         ))}
       </div>
 
-      <div className="app-container">
-      {/* Sidebar */}
-      <aside className="sidebar shell-chrome">
-        <nav className="sidebar-nav">
-          <button 
-            className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            <Activity size={18} />
-            Overview
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'files' ? 'active' : ''}`}
-            onClick={() => setActiveTab('files')}
-          >
-            <Files size={18} />
-            Monitored Files
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'logs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('logs')}
-          >
-            <Terminal size={18} />
-            System Logs
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reports')}
-          >
-            <FileText size={18} />
-            Reports Archive
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('settings')}
-          >
-            <Settings size={18} />
-            Settings
-          </button>
-          <button 
-            className={`nav-item ${activeTab === 'help' ? 'active' : ''}`}
-            onClick={() => setActiveTab('help')}
-          >
-            <HelpCircle size={18} />
-            Tour
-          </button>
-        </nav>
-      </aside>
-
-      {/* Main Content Area */}
-      <main className="main-content">
-          {loading && (
-            <div className="main-loading glass-panel">
-              <RefreshCw className="animate-spin" size={16} />
-              <span>Processing…</span>
-            </div>
-          )}
-
+      {/* Main 4 Sections */}
+      <main className="fx-main" id="main-content">
         {activeTab === 'dashboard' && (
-          <>
-            {status.has_baseline && (
-              <div className="monitoring-status-bar page-toolbar">
-                <div className={`monitoring-pill ${monitoring.active ? 'active' : 'paused'}`}>
-                  <Radio size={14} className={monitoring.is_checking ? 'animate-spin' : ''} />
-                  {monitoring.is_checking
-                    ? 'Scanning now…'
-                    : monitoring.active
-                      ? `Auto check every ${monitoring.interval_minutes} min`
-                      : 'Monitoring paused'}
-                </div>
-                <div className="monitoring-times">
-                  <span>Last: {formatCheckTime(monitoring.last_check_at)}</span>
-                  <span>Next: {monitoring.active ? formatCheckTime(monitoring.next_check_at) : 'N/A'}</span>
-                </div>
-                <button
-                  className="btn btn-primary monitoring-toolbar-btn"
-                  onClick={handleCheckNow}
-                  disabled={loading || monitoring.is_checking}
-                >
-                  <Zap size={14} />
-                  {monitoring.is_checking ? 'Checking…' : 'Check Now'}
-                </button>
-                <button
-                  className="btn btn-secondary monitoring-toolbar-btn"
-                  onClick={handleToggleMonitoring}
-                >
-                  {monitoring.enabled ? <BellOff size={14} /> : <Bell size={14} />}
-                  {monitoring.enabled ? 'Pause' : 'Resume'}
-                </button>
-              </div>
-            )}
+          <DashboardPage
+            status={status}
+            monitoring={monitoring}
+            scanProgress={scanProgress}
+            checkResult={checkResult}
+            changes={changes}
+            files={monitoredFiles}
+            filesLoading={filesLoading}
+            scanning={loading || monitoring.is_checking}
+            tamperDetected={tamperDetected}
+            canAct={canAct}
+            folderLoading={folderLoading}
+            onScan={handleCheckNow}
+            onToggleMonitoring={handleToggleMonitoring}
+            onViewChange={(path) => {
+              setSelectedChangePath(path);
+              setActiveTab('changes');
+            }}
+            onGoChanges={() => setActiveTab('changes')}
+            onGoFolders={() => setActiveTab('folders')}
+            onAddFolder={handleSelectFolder}
+            onAddFiles={handleSelectFiles}
+          />
+        )}
 
-            {/* Critical Tamper Alert Banner */}
-            {(status?.baseline_integrity?.tamper_detected || checkResult?.tamper_detected) && (
-              <div 
-                className="glass-panel" 
-                style={{ 
-                  background: 'rgba(239, 68, 68, 0.15)', 
-                  border: '1px solid var(--color-danger)', 
-                  padding: '1.25rem', 
-                  borderRadius: '12px', 
-                  marginBottom: '1.5rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  color: 'var(--color-danger)'
-                }}
-              >
-                <AlertTriangle size={32} />
-                <div>
-                  <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>CRITICAL SECURITY WARNING: Baseline Tampering Detected!</h4>
-                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-main)' }}>
-                    The cryptographic HMAC-SHA256 signature for <code>baseline.json</code> is invalid. 
-                    The baseline was altered outside of FIMS. Re-verify the baseline or recreate it immediately.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Stats Grid */}
-            <section className="stats-grid">
-              <div className="glass-panel stat-card stat-card-clickable" onClick={() => setActiveTab('files')} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setActiveTab('files')}>
-                <div className="stat-icon-wrapper" style={{ backgroundColor: 'var(--accent-primary-glow)', color: 'var(--accent-primary)' }}>
-                  <HardDrive size={24} />
-                </div>
-                <div className="stat-info">
-                  <span className="stat-value">{status.file_count}</span>
-                  <span className="stat-label">Files Monitored, View</span>
-                </div>
-              </div>
-
-              <div className="glass-panel stat-card">
-                <div className="stat-icon-wrapper" style={{ backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-warning)' }}>
-                  <AlertTriangle size={24} />
-                </div>
-                <div className="stat-info">
-                  <span className="stat-value">{checkResult ? checkResult.modified_files.length : 0}</span>
-                  <span className="stat-label">Modified Files</span>
-                </div>
-              </div>
-
-              <div className="glass-panel stat-card">
-                <div className="stat-icon-wrapper" style={{ backgroundColor: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}>
-                  <FileMinus size={24} />
-                </div>
-                <div className="stat-info">
-                  <span className="stat-value">{checkResult ? checkResult.deleted_files.length : 0}</span>
-                  <span className="stat-label">Deleted Files</span>
-                </div>
-              </div>
-
-              <div className="glass-panel stat-card">
-                <div className="stat-icon-wrapper" style={{ backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)' }}>
-                  <FilePlus size={24} />
-                </div>
-                <div className="stat-info">
-                  <span className="stat-value">{checkResult ? checkResult.new_files.length : 0}</span>
-                  <span className="stat-label">New Files</span>
-                </div>
-              </div>
-            </section>
-
-            {/* Actions Panel */}
-            <section className="dashboard-actions">
-              <div className="glass-panel action-card">
-                <h3 className="card-title"><Folder size={18} className="text-info" /> Monitored Targets</h3>
-
-                {!status.has_baseline ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '1.5rem 0' }}>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleSelectFolder}
-                        disabled={folderLoading}
-                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
-                        title="Open File Explorer to select a folder from your computer"
-                      >
-                        <Folder size={20} />
-                        {folderLoading ? 'Adding…' : 'Add Folder'}
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={handleSelectFiles}
-                        disabled={folderLoading}
-                        style={{ fontSize: '1rem', padding: '0.95rem 1.75rem', gap: '0.65rem' }}
-                        title="Open File Explorer to select specific files from your computer"
-                      >
-                        <FileStack size={20} />
-                        Add Files
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleOpenServerBrowser('folder')}
-                        disabled={folderLoading}
-                        style={{ fontSize: '0.9rem', padding: '0.95rem 1.35rem', gap: '0.5rem' }}
-                        title="Browse server demo presets (e.g. Demo Test Files)"
-                      >
-                        <HardDrive size={18} />
-                        Server Presets
-                      </button>
-                    </div>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '480px' }}>
-                      {FOLDER_HELP_TEXT}
-                    </p>
-                    <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
-                      <input
-                        type="text"
-                        placeholder={FOLDER_PATH_PLACEHOLDER}
-                        value={folderPathInput}
-                        onChange={(e) => setFolderPathInput(e.target.value)}
-                        disabled={folderLoading}
-                      />
-                      <button type="submit" className="btn btn-secondary monitor-path-add-btn" disabled={folderLoading}>
-                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add folder'}
-                      </button>
-                    </form>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    <div className="monitor-list">
-                      {monitors.map((monitor) => (
-                        <div
-                          key={monitor.id}
-                          className={`monitor-list-item ${monitor.id === activeMonitorId ? 'active' : ''}`}
-                        >
-                          <button
-                            type="button"
-                            className="monitor-list-main"
-                            onClick={() => handleSelectMonitor(monitor.id)}
-                          >
-                            {monitor.monitor_type === 'files' ? <FileStack size={18} /> : <Folder size={18} />}
-                            <div>
-                              <span className="monitor-list-label">
-                                {monitor.monitor_type === 'files' ? 'Files' : 'Folder'}
-                              </span>
-                              <span className="monitor-list-path">{monitor.folder_path}</span>
-                              <span className="monitor-list-meta">
-                                {monitor.file_count} file{monitor.file_count === 1 ? '' : 's'}
-                              </span>
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary monitor-list-remove"
-                            onClick={() => handleRemoveMonitor(monitor.id, monitor.folder_path)}
-                            title="Remove monitor"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="dashboard-action-buttons">
-                      <button
-                        className="btn btn-primary btn-check-now"
-                        onClick={handleCheckNow}
-                        disabled={loading || monitoring.is_checking}
-                      >
-                        <Zap size={18} />
-                        {loading || monitoring.is_checking ? 'Checking…' : 'Check Now'}
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={() => setActiveTab('files')}>
-                        <Files size={16} />
-                        View Files
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFolder} disabled={folderLoading} title="Open File Explorer to select a folder from your computer">
-                        <Folder size={16} />
-                        {folderLoading ? 'Adding…' : 'Add Folder'}
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={handleSelectFiles} disabled={folderLoading} title="Open File Explorer to select files from your computer">
-                        <FileStack size={16} />
-                        Add Files
-                      </button>
-                      <button className="btn btn-secondary btn-action-secondary" onClick={() => handleOpenServerBrowser('folder')} disabled={folderLoading} title="Browse server presets (e.g. Demo Test Files)">
-                        <HardDrive size={16} />
-                        Server Presets
-                      </button>
-                    </div>
-
-                    <form className="monitor-path-input" onSubmit={handleAddFolderPath}>
-                      <input
-                        type="text"
-                        placeholder={FOLDER_PATH_PLACEHOLDER}
-                        value={folderPathInput}
-                        onChange={(e) => setFolderPathInput(e.target.value)}
-                        disabled={folderLoading}
-                      />
-                      <button type="submit" className="btn btn-secondary monitor-path-add-btn" disabled={folderLoading}>
-                        <Plus size={16} /> {folderLoading ? 'Adding…' : 'Add folder'}
-                      </button>
-                    </form>
-                  </div>
-                )}
-              </div>
-
-              <div className="glass-panel action-card action-card-compact">
-                <h3 className="card-title"><Clock size={18} className="text-warning" /> Baseline Info</h3>
-                <div className="baseline-info-body">
-                  <div>
-                    <span className="text-muted">Status: </span>
-                    <span className={status.has_baseline ? "text-success" : "text-danger"}>
-                      {status.has_baseline ? "Active" : "No Baseline"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Integrity: </span>
-                    {status.baseline_integrity?.tamper_detected ? (
-                      <span className="text-danger" style={{ fontWeight: 700 }}>
-                        🚨 Tamper Detected!
-                      </span>
-                    ) : status.baseline_integrity?.is_valid ? (
-                      <span className="text-success" style={{ fontWeight: 600 }}>
-                        🔒 HMAC-SHA256 Signed
-                      </span>
-                    ) : (
-                      <span className="text-warning">
-                        ⚠️ Unsigned Legacy
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <span className="text-muted">Created: </span>
-                    <span className="text-primary">{status.created_at || 'N/A'}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Monitors: </span>
-                    <span className="text-primary">{status.monitor_count || monitors.length || 0}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Active target: </span>
-                    <span className="baseline-info-path" title={status.folder_path || 'None'}>
-                      {status.folder_path || 'None'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <input
-              type="file"
-              ref={folderPickerRef}
-              webkitdirectory="true"
-              directory="true"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleDeviceFolderSelected}
-            />
-            <input
-              type="file"
-              ref={filesPickerRef}
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleDeviceFilesSelected}
-            />
-
-            {status.has_baseline && (
-              <AttackSimulatorToolbar
+        {activeTab === 'folders' && (
+          <FoldersPage
+            monitors={monitors}
+            files={monitoredFiles}
+            statusLookup={statusLookup}
+            canAct={canAct}
+            isAdmin={isAdmin}
+            folderLoading={folderLoading}
+            scanning={loading || monitoring.is_checking}
+            folderPathInput={folderPathInput}
+            onFolderPathInput={setFolderPathInput}
+            onSubmitPath={handleAddFolderPath}
+            pathPlaceholder={FOLDER_PATH_PLACEHOLDER}
+            helpText={FOLDER_HELP_TEXT}
+            onAddFolder={handleSelectFolder}
+            onAddFiles={handleSelectFiles}
+            onOpenServerBrowser={handleOpenServerBrowser}
+            onScan={handleCheckNow}
+            onResetBaseline={handleAcceptBaseline}
+            onRemoveMonitor={handleRemoveMonitor}
+            onEdit={handleOpenEditor}
+            onRestore={handleRestoreFile}
+            restoringPath={restoringPath}
+            sandbox={(
+              <TestingSandbox
+                files={monitoredFiles}
                 apiBase={API_BASE}
                 apiFetch={apiFetch}
-                monitors={monitors}
-                activeMonitorId={activeMonitorId}
-                monitoredFiles={monitoredFiles}
-                onOpenEditor={handleOpenEditor}
-                onCheckNow={handleCheckNow}
+                canAct={canAct}
+                onEdit={handleOpenEditor}
+                onSimulated={() => {
+                  fetchMonitoredFiles();
+                  setTimeout(handleCheckNow, 400);
+                }}
                 addConsoleLog={addConsoleLog}
                 addToast={addToast}
-                refreshState={() => refreshMonitorState(activeMonitorId)}
               />
             )}
-
-            {/* User Friendly Status Card */}
-            <section className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <div 
-                  className="stat-icon-wrapper" 
-                  style={{ 
-                    backgroundColor: !status.has_baseline ? 'var(--color-danger-bg)' : checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) ? 'var(--color-warning-bg)' : 'var(--color-success-bg)', 
-                    color: !status.has_baseline ? 'var(--color-danger)' : checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) ? 'var(--color-warning)' : 'var(--color-success)',
-                    width: '60px',
-                    height: '60px',
-                    borderRadius: '50%'
-                  }}
-                >
-                  <Shield size={32} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '0.25rem' }}>
-                    {!status.has_baseline && "First Step: Set up your monitor"}
-                    {status.has_baseline && !checkResult && "Folder is Monitored & Protected"}
-                    {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length === 0) && "System Safe & Secure"}
-                    {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && "Action Required: File Changes Detected"}
-                  </h3>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-                    {!status.has_baseline && "Pick a folder above. A baseline snapshot is created automatically."}
-                    {status.has_baseline && !checkResult && "Monitoring is active. Checks run every 20 minutes, or click Check Now for an immediate scan."}
-                    {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length === 0) && "All monitored files are intact. No unauthorized changes or modifications were found."}
-                    {status.has_baseline && checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && `We found ${checkResult.modified_files.length} modified, ${checkResult.deleted_files.length} deleted, and ${checkResult.new_files.length} new files. See details below.`}
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            {/* Simple Activity Feed */}
-            <section className="glass-panel" style={{ padding: '1.5rem 2rem' }}>
-              <h3 className="card-title" style={{ fontSize: '1.05rem', margin: 0, paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1rem' }}>
-                <Clock size={16} className="text-info" /> Recent Activity Feed
-              </h3>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                {logs.length === 0 ? (
-                  <span className="text-secondary" style={{ fontSize: '0.9rem', fontStyle: 'italic' }}>Ready. Start by monitoring a folder above.</span>
-                ) : (
-                  [...logs].reverse().slice(0, 5).map((log, index) => (
-                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.925rem' }}>
-                      <span style={{ 
-                        width: '8px', 
-                        height: '8px', 
-                        borderRadius: '50%', 
-                        backgroundColor: log.type === 'success' ? 'var(--color-success)' : log.type === 'danger' ? 'var(--color-danger)' : log.type === 'warning' ? 'var(--color-warning)' : 'var(--accent-primary)',
-                        flexShrink: 0
-                      }}></span>
-                      <span className="text-secondary" style={{ fontSize: '0.8rem', minWidth: '65px' }}>{log.timestamp}</span>
-                      <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{log.message}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Collapsible Technical Console for IT/Support */}
-              {logs.length > 0 && (
-                <details style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                  <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--color-gold)', fontWeight: 700 }}>
-                    Show Technical Details (Console logs)
-                  </summary>
-                  <div className="terminal-body" style={{ marginTop: '1rem', maxHeight: '180px', overflowY: 'auto' }}>
-                    {logs.map((log, index) => (
-                      <div key={index} className="log-line" style={{ fontSize: '0.8rem' }}>
-                        <span className="log-time">[{log.timestamp}]</span>
-                        <span className={`log-msg text-${log.type}`}>{log.message}</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </section>
-
-            {/* Friendly "What Changed?" Viewer */}
-            {checkResult && (
-              <section style={{ marginTop: '2rem' }}>
-                <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  {(checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length) === 0
-                    ? <><span style={{ color: 'var(--color-success)' }}>✓</span> Everything Looks Good</>
-                    : <><span style={{ color: 'var(--color-warning)' }}>⚠</span> What Changed in Your Files?</>
-                  }
-                </h2>
-
-                {checkResult && (checkResult.modified_files.length + checkResult.deleted_files.length + checkResult.new_files.length > 0) && (
-                  <div style={{ marginBottom: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <button type="button" className="btn btn-primary" onClick={handleAcceptBaseline} disabled={loading}>
-                      <RotateCcw size={16} /> Accept changes and update baseline
-                    </button>
-                  </div>
-                )}
-
-                {/* All Clear */}
-                {checkResult.modified_files.length === 0 && checkResult.deleted_files.length === 0 && checkResult.new_files.length === 0 && (
-                  <div className="glass-panel" style={{ padding: '2rem', display: 'flex', alignItems: 'center', gap: '1.25rem', borderLeft: '4px solid var(--color-success)' }}>
-                    <span style={{ fontSize: '2.5rem' }}>🛡️</span>
-                    <div>
-                      <p style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.25rem' }}>No changes detected</p>
-                      <p style={{ color: 'var(--text-secondary)' }}>All your monitored files are exactly as they were when you set up monitoring. Nothing has been added, removed, or altered.</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Modified Files */}
-                {checkResult.modified_files.length > 0 && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-warning)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Changed Files ({checkResult.modified_files.length})
-                    </h3>
-                    <FileChangeViewer
-                      modifiedFiles={checkResult.modified_files}
-                      textDifferences={checkResult.text_differences}
-                      fileMetadata={checkResult.file_metadata}
-                      onRestore={handleRestoreFile}
-                      restoringPath={restoringPath}
-                    />
-                  </div>
-                )}
-
-                {/* Deleted Files */}
-                {checkResult.deleted_files.length > 0 && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-danger)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      🗑️ Files That Were Deleted ({checkResult.deleted_files.length})
-                    </h3>
-                    <div className="fc-list">
-                      {checkResult.deleted_files.map((file) => (
-                        <FileDocumentPreview
-                          key={file}
-                          filePath={file}
-                          variant="deleted"
-                          fileMeta={checkResult.file_metadata?.[file]}
-                          onRestore={handleRestoreFile}
-                          restoringPath={restoringPath}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* New Files */}
-                {checkResult.new_files.length > 0 && (
-                  <div>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-success)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      📥 New Files Found ({checkResult.new_files.length})
-                    </h3>
-                    <div className="fc-list">
-                      {checkResult.new_files.map((file) => (
-                        <FileDocumentPreview
-                          key={file}
-                          filePath={file}
-                          variant="new"
-                          fileMeta={checkResult.file_metadata?.[file]}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
-          </>
+          />
         )}
 
-        {activeTab === 'files' && (
-          <MonitoredFilesPanel
-            files={monitoredFiles}
-            folderPath={status.folder_path}
-            monitors={monitors}
-            activeMonitorId={activeMonitorId}
-            onSelectMonitor={handleSelectMonitor}
-            loading={filesLoading}
+        {activeTab === 'changes' && (
+          <ChangesPage
+            changes={changes}
+            hasScanned={Boolean(checkResult)}
+            selectedPath={selectedChangePath}
+            onSelect={setSelectedChangePath}
+            flagged={flaggedPaths.has(selectedChangePath)}
+            canAct={canAct}
+            scanning={loading || monitoring.is_checking}
+            busyPath={busyPath}
+            restoringPath={restoringPath}
+            onScan={handleCheckNow}
+            onMarkSafe={handleMarkFileSafe}
+            onMarkAllSafe={handleAcceptBaseline}
+            onFlag={(change) => setFlagTarget(change)}
             onRestore={handleRestoreFile}
-            onSimulateTamper={handleSimulateTamper}
-            onOpenEditor={handleOpenEditor}
+            onGoFolders={() => setActiveTab('folders')}
+            hasBaseline={status.has_baseline}
           />
         )}
 
-        {activeTab === 'logs' && (
-          <section className="glass-panel" style={{ padding: '1.5rem', minHeight: '500px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-              <h3 className="card-title" style={{ margin: 0 }}><Terminal size={18} /> System Audit Trail (fim_log.txt)</h3>
-              <div className="report-actions">
-                <a href={`${API_BASE}/api/logs/export?format=csv`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export CSV</a>
-                <a href={`${API_BASE}/api/logs/export?format=json`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>Export JSON</a>
-              </div>
-            </div>
-            <div className="terminal-body" style={{ height: '450px' }}>
-              {systemLogs.length === 0 ? (
-                <span className="terminal-empty">No logs recorded yet.</span>
-              ) : (
-                systemLogs.map((log, index) => (
-                  <div key={index} className="log-line">
-                    {log.timestamp && <span className="log-time">[{log.timestamp}]</span>}
-                    <span className="log-msg">{log.message}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        )}
-
-        {activeTab === 'reports' && (
-          <section className="glass-panel" style={{ padding: '1.5rem' }}>
-            <h3 className="card-title"><FileText size={18} /> Available PDF Reports</h3>
-            <p className="text-secondary" style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
-              Only the 5 most recent reports are kept. Older reports are removed automatically.
-              If a download manager blocks saving, use Preview and save from the PDF viewer instead.
-            </p>
-            {reports.length === 0 ? (
-              <p className="text-muted">No integrity check reports found.</p>
-            ) : (
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>Report Filename</th>
-                    <th>Generated Date</th>
-                    <th>Size</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.map((report, idx) => (
-                    <tr key={idx}>
-                      <td style={{ fontWeight: 600 }}>{report.filename}</td>
-                      <td>{report.created_at}</td>
-                      <td>{(report.size_bytes / 1024).toFixed(2)} KB</td>
-                      <td>
-                        <div className="report-actions">
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => setPreviewReport(report.filename)}
-                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-                          >
-                            <Eye size={14} /> Preview
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => handleDownloadReport(report.filename)}
-                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-                          >
-                            <Download size={14} /> Download
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger"
-                            onClick={() => handleDeleteReport(report.filename)}
-                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-                          >
-                            <Trash2 size={14} /> Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {previewReport && (
-              <div className="report-preview-panel">
-                <div className="report-preview-header">
-                  <strong>{previewReport}</strong>
-                  <button type="button" className="btn btn-secondary" onClick={() => setPreviewReport(null)}>Close preview</button>
-                </div>
-                <iframe title="Report preview" src={`${API_BASE}/api/reports/${previewReport}/preview`} />
-              </div>
-            )}
-          </section>
-        )}
-
-        {activeTab === 'settings' && (
-          <SettingsPanel
-            darkMode={darkMode}
-            onToggleDarkMode={() => setDarkMode((value) => !value)}
-            onSaved={() => {
-              addConsoleLog('Settings saved.', 'success');
-              fetchMonitoring();
-            }}
+        {activeTab === 'audit' && (
+          <AuditPage
+            logs={systemLogs}
+            reports={reports}
+            previewReport={previewReport}
+            onPreview={(filename) => setPreviewReport(filename)}
+            onClosePreview={() => setPreviewReport(null)}
+            onDownload={handleDownloadReport}
+            onDelete={handleDeleteReport}
+            isAdmin={isAdmin}
+            canAct={canAct}
+            scanning={loading || monitoring.is_checking}
+            onScan={handleCheckNow}
+            apiBase={API_BASE}
           />
         )}
-
       </main>
-      </div>
 
-      {activeTab === 'help' && (
-        <HelpTour
-          onNavigate={setActiveTab}
-          onClose={() => setActiveTab('dashboard')}
-        />
+      {/* Hidden File Pickers */}
+      <input
+        type="file"
+        ref={folderPickerRef}
+        webkitdirectory="true"
+        directory="true"
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleDeviceFolderSelected}
+      />
+      <input
+        type="file"
+        ref={filesPickerRef}
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleDeviceFilesSelected}
+      />
+
+      {/* Flag Issue Dialog */}
+      <FlagDialog
+        open={Boolean(flagTarget)}
+        fileName={flagTarget?.name || ''}
+        busy={flagBusy}
+        onCancel={() => setFlagTarget(null)}
+        onConfirm={handleFlagFile}
+      />
+
+      {/* In-Browser File Editor Modal */}
+      <FileEditor
+        open={editorModalOpen}
+        filePath={editorFilePath}
+        apiBase={API_BASE}
+        apiFetch={apiFetch}
+        onClose={() => {
+          setEditorModalOpen(false);
+          setEditorFilePath(null);
+        }}
+        onSaved={handleEditorSaved}
+      />
+
+      {/* Help Dialog */}
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {/* Settings Modal */}
+      {settingsOpen && (
+        <div className="fx-modal-overlay" role="presentation" onClick={() => setSettingsOpen(false)}>
+          <div
+            className="fx-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="fx-modal-head">
+              <h2 id="settings-dialog-title">Settings</h2>
+              <button
+                type="button"
+                className="fx-icon-btn"
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="fx-modal-body" style={{ maxHeight: '75vh', overflowY: 'auto' }}>
+              <SettingsPanel
+                darkMode={darkMode}
+                onToggleDarkMode={() => setDarkMode((v) => !v)}
+                onSaved={() => {
+                  addConsoleLog('Settings saved.', 'success');
+                  fetchMonitoring();
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
+      {/* Confirm Dialog */}
       <ConfirmDialog
         open={Boolean(confirmState?.open)}
         title={confirmState?.title}
@@ -1719,6 +1162,7 @@ function App() {
         onCancel={() => closeConfirm(false)}
       />
 
+      {/* Server Presets Modal */}
       <DirectoryBrowserModal
         open={browserModalOpen}
         mode={browserModalMode}
@@ -1727,20 +1171,6 @@ function App() {
         onSelectFolder={handleFolderBrowserSelect}
         onSelectFiles={handleFilesBrowserSelect}
       />
-
-      <FileEditorModal
-        open={editorModalOpen}
-        filePath={editorFilePath}
-        apiBase={API_BASE}
-        apiFetch={apiFetch}
-        onClose={() => {
-          setEditorModalOpen(false);
-          setEditorFilePath(null);
-        }}
-        onSaved={handleEditorSaved}
-      />
     </div>
   );
 }
-
-export default App;
